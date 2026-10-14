@@ -10,6 +10,8 @@ Ideas for making dsaviz easier for students to follow. Roughly in priority order
 
 - [x] **Clearer arrows.** Arrows to a node further left enter its right side, or arc over the row when it's on the same row, instead of looping underneath. Optional, on by default.
 
+- [x] **Your own colours per variable.** Click a variable's name (in its frame, or its name tag) to pick a line colour (its arrow and tag) and a border colour (around the variable and the box it points to). Saved per program in the browser.
+
 ## Next
 
 - [ ] **Smooth movement between steps.** When you press Next, a changed arrow slides from its old target to its new one (about 300 ms), and moved labels glide to their new box.

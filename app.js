@@ -20,6 +20,48 @@
   const moved = new Map();     // key -> {x, y}
   // "labels": variables appear as name tags on the box they point to (fewer arrows).
   // "arrows": every variable draws an arrow, like Python Tutor.
+  // Per-variable colours chosen by the user, saved per program (keyed by a hash
+  // of the code) in this browser, so they survive a refresh.
+  //   colors["zipper_lists|tail"] = { line: "#1c7ed6", border: "#d6336c" }
+  let colors = {};
+  let colorsKey = null;
+  const COLOR_PREFIX = "dsaviz-colors:", COLOR_INDEX = "dsaviz-colors-index", MAX_SAVED = 60;
+  const codeKey = (code) => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < code.length; i++) { h ^= code.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return h.toString(16);
+  };
+  function loadColors(key) {
+    try { return JSON.parse(localStorage.getItem(COLOR_PREFIX + key) || "null"); } catch (_) { return null; }
+  }
+  function saveColors() {
+    if (!colorsKey) return;
+    try {
+      const empty = Object.keys(colors).length === 0;
+      if (empty) localStorage.removeItem(COLOR_PREFIX + colorsKey);
+      else localStorage.setItem(COLOR_PREFIX + colorsKey, JSON.stringify(colors));
+      // keep a short most-recently-used list so old programs don't pile up forever
+      let idx = [];
+      try { idx = JSON.parse(localStorage.getItem(COLOR_INDEX) || "[]"); } catch (_) {}
+      idx = idx.filter((k) => k !== colorsKey);
+      if (!empty) idx.unshift(colorsKey);
+      idx.slice(MAX_SAVED).forEach((k) => localStorage.removeItem(COLOR_PREFIX + k));
+      localStorage.setItem(COLOR_INDEX, JSON.stringify(idx.slice(0, MAX_SAVED)));
+    } catch (_) {}
+  }
+  // Called whenever a new version of the code runs. Editing a program carries its
+  // colours along; switching to a program that has its own saved colours loads them.
+  function useColorsFor(code, { carry }) {
+    const key = codeKey(code);
+    if (key === colorsKey) return;
+    const saved = loadColors(key);
+    if (saved) colors = saved;
+    else if (!carry) colors = {};
+    colorsKey = key;
+    if (!saved && Object.keys(colors).length) saveColors();
+  }
+  const colorFor = (frameName, name) => colors[`${frameName}|${name}`] || null;
+
   let arrowStyle = "smart";
   try { arrowStyle = localStorage.getItem("dsaviz-arrows") || "smart"; } catch (_) {}
   let pointerMode = "labels";
@@ -110,6 +152,7 @@
     editor.value = examples[Number(examplesSel.value)].code;
     editor.scrollTop = 0;
     moved.clear();
+    useColorsFor(editor.value, { carry: false });
     run({ keepStep: false });
   });
 
@@ -126,10 +169,14 @@
   if (hashMatch) {
     try { editor.value = b64decode(hashMatch[1]); examplesSel.value = "custom"; }
     catch (_) { editor.value = examples[0].code; examplesSel.value = "0"; }
-  } else if (examples.length) {
-    editor.value = examples[0].code;
-    examplesSel.value = "0";
+  } else {
+    let last = null;
+    try { last = localStorage.getItem("dsaviz-last-code"); } catch (_) {}
+    const i = last == null ? 0 : examples.findIndex((ex) => ex.code === last);
+    if (last != null && i < 0) { editor.value = last; examplesSel.value = "custom"; }
+    else if (examples.length) { editor.value = examples[Math.max(0, i)].code; examplesSel.value = String(Math.max(0, i)); }
   }
+  useColorsFor(editor.value, { carry: false });
   $("viz").hidden = true;
   paintEditor();
 
@@ -192,6 +239,8 @@
     const oldIndex = stepIndex;
     result = r;
     ranCode = code;
+    useColorsFor(code, { carry: true });
+    try { localStorage.setItem("dsaviz-last-code", code); } catch (_) {}
     layout = null;
     stepIndex = sameShape ? Math.min(oldIndex, r.steps.length - 1) : 0;
     $("slider").max = String(r.steps.length - 1);
@@ -304,10 +353,11 @@
       const o = heap[id];
       return `<span class="val muted">${o.type === "class" ? "class" : "function"} ${esc(o.name)}</span>`;
     }
+    const line = opts.color && opts.color.line;
     if (opts.frame && pointerMode === "labels" && heap[id]) {
-      return `<span class="chip${opts.changed ? " changed" : ""}">→ ${esc(shortName(heap, id))}</span>`;
+      return `<span class="chip${opts.changed ? " changed" : ""}"${line ? ` style="color:${line}"` : ""}>→ ${esc(shortName(heap, id))}</span>`;
     }
-    return `<span class="ptr${opts.frame ? " fptr" : ""}" data-ref="${id}"${opts.changed ? ' data-changed="1"' : ""}${wasAttr}><span class="dot"></span></span>`;
+    return `<span class="ptr${opts.frame ? " fptr" : ""}" data-ref="${id}"${opts.changed ? ' data-changed="1"' : ""}${line ? ` data-color="${line}"` : ""}${wasAttr}><span class="dot"${line ? ` style="background:${line}"` : ""}></span></span>`;
   }
 
   function childRefs(o) {
@@ -362,9 +412,19 @@
       head = o.cls || "object"; body = `<div class="plain">${esc(o.repr || "")}</div>`;
     }
     const tagHTML = tags && tags.length
-      ? `<div class="tags">${tags.map((t) => `<span class="ptag${t.local ? " local" : ""}${t.changed ? " changed" : ""}" title="variable in ${esc(t.frame)}">${esc(t.name)}</span>`).join("")}</div>`
+      ? `<div class="tags">${tags.map((t) => `<span class="ptag${t.local ? " local" : ""}${t.changed ? " changed" : ""}" data-frame="${esc(t.frame)}" data-var="${esc(t.name)}" title="${t.name === "return" ? "return value" : `variable in ${esc(t.frame)}, click to colour it`}"${tagStyle(t)}>${esc(t.name)}</span>`).join("")}</div>`
       : "";
     return `<div class="obj" data-id="${id}">${tagHTML}<div class="obj-head">${esc(head)}</div>${body}</div>`;
+  }
+
+  function tagStyle(t) {
+    const c = t.color;
+    if (!c) return "";
+    const parts = [];
+    if (t.changed && c.line) parts.push(`background:${c.line}`, `border-color:${c.line}`, "color:#fff");
+    else if (c.line) parts.push(`color:${c.line}`, `border-color:${c.line}`);
+    if (c.border) parts.push(`box-shadow:0 0 0 2px ${c.border}`);
+    return parts.length ? ` style="${parts.join(";")}"` : "";
   }
 
   // ---------- what changed between two steps ----------
@@ -547,16 +607,21 @@
     else showBanner(null);
 
     // frames
-    const tags = new Map();   // object id -> [{name, frame, local, changed}]
+    const tags = new Map();   // object id -> [{name, frame, local, changed, color}]
+    const boxBorder = new Map();   // object id -> border colour from a variable pointing at it
     const lastFrame = step.frames.length - 1;
     $("frames").innerHTML = step.frames.map((f, fi) => {
       const rows = f.vars.filter(([, v]) => !(v[0] === "ref" && isHidden(heap, v[1]))).map(([name, v]) => {
         const key = varKey(f, name), ch = diff.changed.has(key);
         if (labels && v[0] === "ref" && heap[v[1]]) {
           if (!tags.has(v[1])) tags.set(v[1], []);
-          tags.get(v[1]).push({ name, frame: f.name, local: fi === lastFrame && fi > 0, changed: ch });
+          tags.get(v[1]).push({ name, frame: f.name, local: fi === lastFrame && fi > 0, changed: ch, color: colorFor(f.name, name) });
         }
-        return `<div class="vrow${ch ? " changed" : ""}"><span class="vname">${esc(name)}</span>${valueHTML(v, heap, { frame: true, changed: ch, was: ch ? diff.old.get(key) : null })}</div>`;
+        const col = colorFor(f.name, name);
+        if (col && col.border && v[0] === "ref" && heap[v[1]] && !boxBorder.has(v[1])) boxBorder.set(v[1], col.border);
+        const rowStyle = col && col.border ? ` style="box-shadow: inset 0 0 0 2px ${col.border}"` : "";
+        const swatch = col && (col.line || col.border) ? `<span class="swatch" style="background:${col.line || "transparent"};border-color:${col.border || col.line}"></span>` : "";
+        return `<div class="vrow${ch ? " changed" : ""}"${rowStyle}><button class="vname" data-frame="${esc(f.name)}" data-var="${esc(name)}" title="Choose colours for ${esc(name)}">${swatch}${esc(name)}</button>${valueHTML(v, heap, { frame: true, changed: ch, was: ch ? diff.old.get(key) : null, color: col })}</div>`;
       }).join("");
       let ret = "";
       if (f.returning) {
@@ -574,6 +639,10 @@
     const visible = Object.keys(heap).filter((id) => heap[id] && !isHidden(heap, id) && layout.pos.has(id));
     const heapEl = $("heap");
     heapEl.innerHTML = visible.map((id) => objectHTML(id, heap[id], heap, diff, tags.get(id))).join("");
+    boxBorder.forEach((c, id) => {
+      const el = heapEl.querySelector(`.obj[data-id="${id}"]`);
+      if (el) { el.style.borderColor = c; el.style.boxShadow = `0 0 0 2px ${c}`; }
+    });
 
     const GAP_X = 46, GAP_Y = 26;
     const rowBox = new Map(), rowTag = new Map(), usedCols = new Map();
@@ -617,7 +686,8 @@
     svg.setAttribute("width", viz.scrollWidth);
     svg.setAttribute("height", viz.scrollHeight);
     const marker = (id, color) => `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>`;
-    let ghosts = "", normal = "", hot = "";
+    let ghosts = "", normal = "", colored = "", hot = "";
+    const customMarkers = new Map();
     // Arrows always leave the dot heading right.
     // "smart" routing picks the side of the target box that keeps the arrow clear:
     //   - box to the right: enter its left edge;
@@ -669,14 +739,77 @@
       const target = viz.querySelector(`.obj[data-id="${ptr.dataset.ref}"]`);
       if (!target) return;
       const p = curve(ptr, target);
-      if (ptr.dataset.changed) {
+      const col = ptr.dataset.color;
+      if (col) {
+        const mid = "head-" + col.replace(/[^a-z0-9]/gi, "");
+        if (!customMarkers.has(mid)) customMarkers.set(mid, marker(mid, col));
+        const w = ptr.dataset.changed ? 2.8 : 2;
+        const seg = `<circle cx="${p.sx}" cy="${p.sy}" r="3.5" fill="${col}"/><path d="${p.d}" fill="none" stroke="${col}" stroke-width="${w}" marker-end="url(#${mid})"/>`;
+        if (ptr.dataset.changed) hot += seg; else colored += seg;
+      } else if (ptr.dataset.changed) {
         hot += `<circle cx="${p.sx}" cy="${p.sy}" r="3.5" fill="var(--hot)"/><path d="${p.d}" fill="none" stroke="var(--hot)" stroke-width="2.6" marker-end="url(#head-hot)"/>`;
       } else {
         normal += `<circle cx="${p.sx}" cy="${p.sy}" r="3" fill="var(--arrow)"/><path d="${p.d}" fill="none" stroke="var(--arrow)" stroke-width="1.5" marker-end="url(#head)"/>`;
       }
     });
-    svg.innerHTML = `<defs>${marker("head", "var(--arrow)")}${marker("head-hot", "var(--hot)")}${marker("head-ghost", "var(--ghost)")}</defs>${ghosts}${normal}${hot}`;
+    svg.innerHTML = `<defs>${marker("head", "var(--arrow)")}${marker("head-hot", "var(--hot)")}${marker("head-ghost", "var(--ghost)")}${[...customMarkers.values()].join("")}</defs>${ghosts}${normal}${colored}${hot}`;
   }
+
+  // ---------- colour picker ----------
+  // Click a variable's name (in a frame, or its name tag on a box) to give it a
+  // line colour (its arrow and name tag) and a border colour (around the
+  // variable and the box it points to).
+  const SWATCHES = ["#d6336c", "#e8590c", "#e0a100", "#2f9e44", "#0c8599", "#1c7ed6", "#7048e8", "#495057"];
+  const pop = $("color-pop");
+  let popTarget = null;   // "frame|name"
+
+  function swatchRow(kind, current) {
+    const btns = SWATCHES.map((c) => `<button class="sw${current === c ? " on" : ""}" data-kind="${kind}" data-c="${c}" style="background:${c}" aria-label="${kind} colour ${c}"></button>`).join("");
+    const custom = `<label class="sw custom" title="Any colour"><input type="color" data-kind="${kind}" value="${current || "#1c7ed6"}"></label>`;
+    const none = `<button class="sw none${!current ? " on" : ""}" data-kind="${kind}" data-c="" aria-label="No ${kind} colour" title="None">×</button>`;
+    return btns + custom + none;
+  }
+  function openPicker(frameName, name, anchor) {
+    popTarget = `${frameName}|${name}`;
+    const c = colors[popTarget] || {};
+    pop.innerHTML = `<div class="pop-title"><code>${esc(name)}</code> <span class="muted">in ${esc(frameName)}</span></div>
+      <div class="pop-label">Line <span class="muted">(arrow and name tag)</span></div><div class="pop-row">${swatchRow("line", c.line)}</div>
+      <div class="pop-label">Border <span class="muted">(around the variable and its box)</span></div><div class="pop-row">${swatchRow("border", c.border)}</div>
+      <div class="pop-foot"><span class="muted">Saved for this code in this browser.</span><button class="pop-reset">Reset</button></div>`;
+    pop.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    const w = pop.offsetWidth, hgt = pop.offsetHeight;
+    let left = r.left + window.scrollX, top = r.bottom + window.scrollY + 6;
+    left = Math.max(8, Math.min(left, window.scrollX + document.documentElement.clientWidth - w - 8));
+    if (r.bottom + hgt + 12 > window.innerHeight) top = r.top + window.scrollY - hgt - 6;
+    pop.style.left = left + "px"; pop.style.top = top + "px";
+  }
+  function closePicker() { pop.hidden = true; popTarget = null; }
+  function setColor(kind, value) {
+    if (!popTarget) return;
+    const c = { ...(colors[popTarget] || {}) };
+    if (value) c[kind] = value; else delete c[kind];
+    if (c.line || c.border) colors[popTarget] = c; else delete colors[popTarget];
+    saveColors();
+    pop.querySelectorAll(`.sw[data-kind="${kind}"]`).forEach((b) => b.classList.toggle("on", b.dataset.c === (value || "")));
+    if (result) render({});
+  }
+  pop.addEventListener("click", (e) => {
+    const b = e.target.closest("button.sw");
+    if (b) setColor(b.dataset.kind, b.dataset.c);
+    if (e.target.closest(".pop-reset") && popTarget) { delete colors[popTarget]; saveColors(); if (result) render({}); closePicker(); }
+  });
+  pop.addEventListener("input", (e) => { if (e.target.type === "color") setColor(e.target.dataset.kind, e.target.value); });
+  document.addEventListener("pointerdown", (e) => {
+    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("[data-var]")) closePicker();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pop.hidden) closePicker(); });
+  $("frames").addEventListener("click", (e) => {
+    const b = e.target.closest(".vname[data-var]");
+    if (b) openPicker(b.dataset.frame, b.dataset.var, b);
+  });
+  // Name tags live inside draggable boxes, so a tap on a tag is detected in the
+  // drag handler below (a press and release that didn't move).
 
   // ---------- dragging ----------
   // Boxes can be dragged anywhere in the drawing area. A dragged box keeps its
@@ -688,27 +821,33 @@
       const el = e.target.closest(".obj");
       if (!el || e.button !== 0 || !layout) return;
       e.preventDefault();
-      drag = { el, key: layout.key.get(el.dataset.id), px: e.clientX, py: e.clientY, x: el.offsetLeft, y: el.offsetTop };
+      drag = { el, key: layout.key.get(el.dataset.id), px: e.clientX, py: e.clientY, x: el.offsetLeft, y: el.offsetTop,
+               tag: e.target.closest(".ptag[data-var]"), movedPx: 0 };
       el.classList.add("dragging");
       el.setPointerCapture(e.pointerId);
     });
     heapEl.addEventListener("pointermove", (e) => {
       if (!drag) return;
+      drag.movedPx = Math.max(drag.movedPx, Math.abs(e.clientX - drag.px) + Math.abs(e.clientY - drag.py));
+      if (drag.movedPx < 4) return;
       const x = Math.max(0, drag.x + e.clientX - drag.px);
       const tagEl = drag.el.querySelector(".tags");
       const y = Math.max(tagEl ? tagEl.offsetHeight + 4 : 0, drag.y + e.clientY - drag.py);
       drag.el.style.left = x + "px";
       drag.el.style.top = y + "px";
       moved.set(drag.key, { x, y });
+      drag.didMove = true;
       heapEl.style.width = Math.max(heapEl.offsetWidth, x + drag.el.offsetWidth) + "px";
       heapEl.style.height = Math.max(heapEl.offsetHeight, y + drag.el.offsetHeight) + "px";
       $("reset-layout").disabled = false;
       drawArrows();
     });
-    const end = () => {
+    const end = (e) => {
       if (!drag) return;
       drag.el.classList.remove("dragging");
+      const tag = drag.tag, tapped = !drag.didMove && e.type === "pointerup";
       drag = null;
+      if (tapped && tag && tag.dataset.var !== "return") openPicker(tag.dataset.frame, tag.dataset.var, tag);
     };
     heapEl.addEventListener("pointerup", end);
     heapEl.addEventListener("pointercancel", end);

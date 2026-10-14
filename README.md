@@ -22,8 +22,9 @@ Everything is on one page: code on the left, the drawing on the right.
    - Whatever changed is coral: the pointer that moved, values that changed, and name tags that moved. A dashed grey line shows where a pointer used to go.
    - **Clearer arrows** (on by default) sends each arrow to the nearest side of its target, so a pointer back to an earlier node, as in a reversed list, enters that node from the right or arcs over the row instead of doubling back underneath. Turn it off to have every arrow enter from the left, like Python Tutor.
    - **Labels** (the default) shows variables as name tags on the box they point to, so only links between objects are drawn as arrows. **Arrows** draws every variable as an arrow, like Python Tutor.
-3. Drag any box to rearrange the drawing. Moved boxes stay put while you step and while you edit; **Reset layout** puts them back.
-4. **Copy link** puts your code in the URL, so you can share or bookmark it. Nothing is stored anywhere.
+3. Click a variable's name, in its frame or on its name tag, to give it its own colours: a **line** colour for its arrow and name tag, and a **border** colour around the variable and the box it points to. Colours are saved per program in your browser (with your last code), so they're still there after a refresh, and they follow the program while you edit it.
+4. Drag any box to rearrange the drawing. Moved boxes stay put while you step and while you edit; **Reset layout** puts them back.
+5. **Copy link** puts your code in the URL, so you can share or bookmark it. Your code never leaves your browser.
 
 The first visit downloads Python (about 10 MB). After that, the browser caches it.
 
