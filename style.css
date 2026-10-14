@@ -158,8 +158,11 @@ kbd { font-family: var(--mono); font-size: 12px; border: 1px solid var(--border)
 .seg { display: inline-flex; }
 .seg button { border-radius: 0; }
 .seg button:first-child { border-radius: 8px 0 0 8px; }
-.seg button:last-child { border-radius: 0 8px 8px 0; border-left: 0; }
-.seg button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+/* Neighbouring buttons overlap by 1px so there's a single divider; the selected
+   one is lifted above its neighbour so all four of its accent borders show. */
+.seg button:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+.seg button { position: relative; }
+.seg button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); z-index: 1; }
 
 /* per-variable colours */
 .vname { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; border-radius: 4px; padding: 0 2px; margin: 0 -2px; }

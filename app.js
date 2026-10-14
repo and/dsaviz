@@ -193,7 +193,7 @@
     try {
       await loadScript(INDEX_URL + "pyodide.js");
       const pyodide = await window.loadPyodide({ indexURL: INDEX_URL });
-      const src = await (await fetch("tracer.py?v=7")).text();
+      const src = await (await fetch("tracer.py?v=8")).text();
       const ns = pyodide.globals.get("dict")();
       ns.set("__name__", "dsaviz_tracer");
       pyodide.runPython(src, { globals: ns });
