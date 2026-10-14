@@ -40,11 +40,13 @@ a { color: var(--accent); }
   padding: 14px 16px; max-width: 1700px; margin: 0 auto; align-items: start; }
 .workspace > * { min-width: 0; }
 @media (max-width: 900px) { .workspace { grid-template-columns: minmax(0, 1fr); } .splitter { display: none; } }
-/* Drag handle between the code and the drawing. */
-.splitter { align-self: stretch; cursor: col-resize; position: relative; touch-action: none; border-radius: 6px; }
-.splitter::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px;
-  background: var(--border); border-radius: 2px; transition: background .15s, width .15s, margin-left .15s; }
-.splitter:hover::after, .splitter:focus-visible::after, .splitter.dragging::after { background: var(--accent); width: 4px; margin-left: -2px; }
+/* Drag handle between the code and the drawing: a small grip, no full-height line. */
+.splitter { align-self: stretch; cursor: col-resize; position: relative; touch-action: none; }
+.splitter::after { content: ""; position: absolute; top: 50%; left: 50%; width: 4px; height: 44px;
+  transform: translate(-50%, -50%); border-radius: 4px; background: var(--border); opacity: .7;
+  transition: background .15s, opacity .15s, height .15s; }
+.splitter:hover::after, .splitter:focus-visible::after { opacity: 1; background: var(--muted); }
+.splitter.dragging::after { opacity: 1; background: var(--accent); height: 64px; }
 .splitter:focus-visible { outline: none; }
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing iframe, body.resizing .viz { pointer-events: none; }
