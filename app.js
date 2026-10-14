@@ -13,6 +13,7 @@
   let result = null;
   let stepIndex = 0;
   let layout = null;      // { pos: Map(id -> {r, c}) } for the current run
+  const moved = new Map(); // id -> {x, y}: boxes the user has dragged, kept for the whole run
 
   // ---------- helpers ----------
   const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
@@ -142,6 +143,7 @@
       }
       setStatus("");
       layout = null;
+      moved.clear();
       stepIndex = 0;
       $("edit-view").hidden = true;
       $("viz-view").hidden = false;
@@ -368,13 +370,18 @@
     };
     const [rowY, totalH] = offsets(usedRows, GAP_Y);
     const [colX, totalW] = offsets(usedCols, GAP_X);
+    let maxW = totalW, maxH = totalH;
     els.forEach((el, id) => {
-      const p = layout.pos.get(id);
-      el.style.left = colX.get(p.c) + "px";
-      el.style.top = rowY.get(p.r) + "px";
+      const p = layout.pos.get(id), m = moved.get(id);
+      const x = m ? m.x : colX.get(p.c), y = m ? m.y : rowY.get(p.r);
+      el.style.left = x + "px";
+      el.style.top = y + "px";
+      maxW = Math.max(maxW, x + el.offsetWidth);
+      maxH = Math.max(maxH, y + el.offsetHeight);
     });
-    heapEl.style.width = totalW + "px";
-    heapEl.style.height = totalH + "px";
+    heapEl.style.width = maxW + "px";
+    heapEl.style.height = maxH + "px";
+    $("reset-layout").disabled = moved.size === 0;
 
     drawArrows();
   }
@@ -397,6 +404,42 @@
     });
     svg.innerHTML = paths;
   }
+
+  // ---------- dragging ----------
+  // Boxes can be dragged anywhere in the drawing area. A dragged box keeps its
+  // spot for every step of this run; "Reset layout" puts everything back.
+  (function enableDragging() {
+    const heapEl = $("heap");
+    let drag = null;
+    heapEl.addEventListener("pointerdown", (e) => {
+      const el = e.target.closest(".obj");
+      if (!el || e.button !== 0) return;
+      e.preventDefault();
+      drag = { el, id: el.dataset.id, px: e.clientX, py: e.clientY, x: el.offsetLeft, y: el.offsetTop };
+      el.classList.add("dragging");
+      el.setPointerCapture(e.pointerId);
+    });
+    heapEl.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const x = Math.max(0, drag.x + e.clientX - drag.px);
+      const y = Math.max(0, drag.y + e.clientY - drag.py);
+      drag.el.style.left = x + "px";
+      drag.el.style.top = y + "px";
+      moved.set(drag.id, { x, y });
+      heapEl.style.width = Math.max(heapEl.offsetWidth, x + drag.el.offsetWidth) + "px";
+      heapEl.style.height = Math.max(heapEl.offsetHeight, y + drag.el.offsetHeight) + "px";
+      $("reset-layout").disabled = false;
+      drawArrows();
+    });
+    const end = () => {
+      if (!drag) return;
+      drag.el.classList.remove("dragging");
+      drag = null;
+    };
+    heapEl.addEventListener("pointerup", end);
+    heapEl.addEventListener("pointercancel", end);
+    $("reset-layout").addEventListener("click", () => { moved.clear(); if (result) render(); });
+  })();
 
   boot();
 })();

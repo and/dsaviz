@@ -38,6 +38,7 @@
       <div class="code-col">
         <div class="toolbar">
           <button id="back-to-edit">← Edit code</button>
+          <button id="reset-layout" title="Put dragged boxes back where they started" disabled>Reset layout</button>
           <span class="grow"></span>
           <button id="share2" title="Copy a link that opens this code">Copy link</button>
         </div>
@@ -56,6 +57,7 @@
         <pre class="stdout" id="stdout"></pre>
       </div>
       <div class="viz-col">
+        <div class="viz-hint muted">Drag any box to move it.</div>
         <div class="viz" id="viz">
           <svg class="arrows" id="arrows"></svg>
           <div class="frames" id="frames"></div>

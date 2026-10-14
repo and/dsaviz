@@ -99,6 +99,9 @@ button.primary:hover:not(:disabled) { opacity: .9; background: var(--accent); }
 
 .obj { position: absolute; background: var(--obj-bg); border: 1px solid var(--obj-border); border-radius: 6px;
   font-family: var(--mono); font-size: 13px; transition: left .15s, top .15s; }
+.obj { cursor: grab; touch-action: none; user-select: none; }
+.obj.dragging { cursor: grabbing; transition: none; z-index: 5; outline: 2px solid var(--accent); outline-offset: 1px; }
+.viz-hint { font-size: 12px; padding: 8px 16px 0; }
 .obj-head { font-size: 11px; color: var(--obj-head); padding: 3px 8px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; letter-spacing: .2px; }
 .obj table { border-collapse: collapse; }
 .obj td { border-top: 1px solid var(--obj-border); padding: 4px 8px; white-space: nowrap; }
