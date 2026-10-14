@@ -1,6 +1,12 @@
 (() => {
   "use strict";
 
+  // The app version is the ?v= number on this script's <script> tag in
+  // index.html, so there is one place to bump it. It's also used to fetch
+  // tracer.py without a stale cached copy, and shown in the footer.
+  const APP_VERSION = (() => {
+    try { return new URL(document.currentScript.src).searchParams.get("v") || "dev"; } catch (_) { return "dev"; }
+  })();
   const PYODIDE_VERSION = "314.0.7";
   const params = new URLSearchParams(location.search);
   const INDEX_URL = params.get("pyodide") || `https://cdn.jsdelivr.net/npm/pyodide@${PYODIDE_VERSION}/`;
@@ -178,6 +184,7 @@
   }
   useColorsFor(editor.value, { carry: false });
   $("viz").hidden = true;
+  $("app-version").textContent = `dsaviz v${APP_VERSION}`;
   paintEditor();
 
   // ---------- Pyodide ----------
@@ -193,7 +200,7 @@
     try {
       await loadScript(INDEX_URL + "pyodide.js");
       const pyodide = await window.loadPyodide({ indexURL: INDEX_URL });
-      const src = await (await fetch("tracer.py?v=8")).text();
+      const src = await (await fetch(`tracer.py?v=${APP_VERSION}`)).text();
       const ns = pyodide.globals.get("dict")();
       ns.set("__name__", "dsaviz_tracer");
       pyodide.runPython(src, { globals: ns });

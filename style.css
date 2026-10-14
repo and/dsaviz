@@ -184,3 +184,6 @@ kbd { font-family: var(--mono); font-size: 12px; border: 1px solid var(--border)
 .sw.custom input { position: absolute; inset: -6px; opacity: 0; cursor: pointer; }
 .pop-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; gap: 8px; }
 .pop-foot button { padding: 4px 10px; font-size: 13px; }
+
+.version { display: inline-block; margin-top: 6px; font-family: var(--mono); font-size: 12px; color: var(--muted); text-decoration: none; }
+.version:hover { color: var(--accent); text-decoration: underline; }
