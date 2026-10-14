@@ -20,6 +20,7 @@ Everything is on one page: code on the left, the drawing on the right.
 2. Step with **Next / Prev**, the slider, or the ← → keys. The editor highlights the line that just ran and the one that runs next.
    - The box above the drawing says, in plain English, what the last line did ("`Node 'x'.next` now points to `Node 'b'` (was Node 'y')").
    - Whatever changed is coral: the pointer that moved, values that changed, and name tags that moved. A dashed grey line shows where a pointer used to go.
+   - **Clearer arrows** (on by default) sends each arrow to the nearest side of its target, so a pointer back to an earlier node, as in a reversed list, enters that node from the right or arcs over the row instead of doubling back underneath. Turn it off to have every arrow enter from the left, like Python Tutor.
    - **Labels** (the default) shows variables as name tags on the box they point to, so only links between objects are drawn as arrows. **Arrows** draws every variable as an arrow, like Python Tutor.
 3. Drag any box to rearrange the drawing. Moved boxes stay put while you step and while you edit; **Reset layout** puts them back.
 4. **Copy link** puts your code in the URL, so you can share or bookmark it. Nothing is stored anywhere.

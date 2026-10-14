@@ -20,6 +20,8 @@
   const moved = new Map();     // key -> {x, y}
   // "labels": variables appear as name tags on the box they point to (fewer arrows).
   // "arrows": every variable draws an arrow, like Python Tutor.
+  let arrowStyle = "smart";
+  try { arrowStyle = localStorage.getItem("dsaviz-arrows") || "smart"; } catch (_) {}
   let pointerMode = "labels";
   try { pointerMode = localStorage.getItem("dsaviz-pointers") || "labels"; } catch (_) {}
 
@@ -223,6 +225,13 @@
     $("mode-arrows").setAttribute("aria-pressed", String(m === "arrows"));
     if (result) render({});
   }
+  const smartBox = $("smart-arrows");
+  smartBox.checked = arrowStyle === "smart";
+  smartBox.addEventListener("change", () => {
+    arrowStyle = smartBox.checked ? "smart" : "classic";
+    try { localStorage.setItem("dsaviz-arrows", arrowStyle); } catch (_) {}
+    if (result) drawArrows();
+  });
   $("mode-labels").addEventListener("click", () => setMode("labels"));
   $("mode-arrows").addEventListener("click", () => setMode("arrows"));
   setMode(pointerMode);
@@ -609,25 +618,44 @@
     svg.setAttribute("height", viz.scrollHeight);
     const marker = (id, color) => `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>`;
     let ghosts = "", normal = "", hot = "";
-    // Arrows leave the dot heading right. They enter a box from the left when it
-    // is to the right; a box that is above or below (and not to the right) is
-    // entered from its bottom or top edge instead, so the arrow doesn't loop.
+    // Arrows always leave the dot heading right.
+    // "smart" routing picks the side of the target box that keeps the arrow clear:
+    //   - box to the right: enter its left edge;
+    //   - box further left, above or below: swing round and enter its RIGHT edge,
+    //     so the arrow doesn't double back underneath the boxes;
+    //   - box directly above or below (columns overlap): enter its top or bottom edge;
+    //   - box to the left on the same row (or the node itself): arc over the top.
+    // "classic" always enters the left edge, like Python Tutor.
     const curve = (from, toEl) => {
       const a = from.getBoundingClientRect(), b = toEl.getBoundingClientRect();
       const sx = a.left + a.width / 2 - box.left, sy = a.top + a.height / 2 - box.top;
       const L = b.left - box.left, T = b.top - box.top, R = b.right - box.left, B = b.bottom - box.top;
+      const leftEntry = () => {
+        const tx = L - 1, ty = T + 12, dx = Math.max(40, Math.abs(tx - sx) / 2);
+        return `M${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`;
+      };
       let d;
-      if (L >= sx + 12) {
-        const tx = L - 1, ty = T + 12, dx = Math.max(40, (tx - sx) / 2);
-        d = `M${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`;
+      if (arrowStyle === "classic" || L >= sx + 12) {
+        d = leftEntry();
       } else if (B < sy - 8 || T > sy + 8) {
-        const up = B < sy;
-        const tx = Math.min(R - 14, Math.max(L + 14, (L + R) / 2)), ty = up ? B + 1 : T - 1;
-        const dy = Math.max(30, Math.abs(ty - sy) / 2);
-        d = `M${sx} ${sy} C ${sx + 40} ${sy}, ${tx} ${up ? ty + dy : ty - dy}, ${tx} ${ty}`;
+        if (R + 16 < sx) {
+          const tx = R + 1, ty = Math.min(B - 12, Math.max(T + 12, sy));
+          const out = Math.max(36, Math.min(80, Math.abs(ty - sy) / 2));
+          d = `M${sx} ${sy} C ${sx + out} ${sy}, ${tx + out} ${ty}, ${tx} ${ty}`;
+        } else {
+          const up = B < sy;
+          const tx = Math.min(R - 14, Math.max(L + 14, (L + R) / 2)), ty = up ? B + 1 : T - 1;
+          const dy = Math.max(30, Math.abs(ty - sy) / 2);
+          d = `M${sx} ${sy} C ${sx + 40} ${sy}, ${tx} ${up ? ty + dy : ty - dy}, ${tx} ${ty}`;
+        }
       } else {
-        const tx = L - 1, ty = T + 12;
-        d = `M${sx} ${sy} C ${sx + 60} ${sy}, ${tx - 60} ${ty}, ${tx} ${ty}`;
+        // Arc over the row, clearing any name tags, and land near the box's
+        // right end (tags sit on the left).
+        const tags = toEl.querySelector(".tags");
+        const tagH = tags ? tags.offsetHeight + 4 : 0;
+        const tx = Math.max(L + 14, R - 16), ty = T - 1;
+        const lift = Math.max(2, Math.min(T - tagH, sy) - 34);
+        d = `M${sx} ${sy} C ${sx + 50} ${lift}, ${tx} ${lift}, ${tx} ${ty}`;
       }
       return { sx, sy, d };
     };
