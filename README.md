@@ -4,6 +4,8 @@
 
 **Live:** https://and.github.io/dsaviz/
 
+![dsaviz stepping through a zipper-lists function: the code on the left with the line that just ran highlighted, and on the right the variables and linked-list nodes drawn as boxes and arrows, with current_1 just moved to node c](docs/screenshot.png)
+
 It's like [Python Tutor](https://pythontutor.com), but everything runs **in your browser**. Python is executed by [Pyodide](https://pyodide.org) (CPython compiled to WebAssembly), so there's no backend to host, nothing to keep alive, and your code never leaves your machine. The site is just static files on GitHub Pages.
 
 ## What it's good for
