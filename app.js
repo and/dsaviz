@@ -124,6 +124,7 @@
   let rerunTimer = null;
   editor.addEventListener("input", () => {
     examplesSel.value = "custom";
+    saveYourCode(editor.value);
     paintEditor();
     clearTimeout(rerunTimer);
     rerunTimer = setTimeout(() => run({ keepStep: true }), RERUN_DELAY_MS);
@@ -174,9 +175,24 @@
   const custom = document.createElement("option");
   custom.value = "custom"; custom.textContent = "Your code";
   examplesSel.appendChild(custom);
+  // "Your code" keeps its own copy, so trying an example and switching back
+  // brings your code back (also after a refresh).
+  const YOUR_CODE_KEY = "dsaviz-your-code";
+  let yourCode = null;
+  let yourCodeTimer = null;
+  function saveYourCode(code, { persist = true } = {}) {
+    yourCode = code;
+    if (!persist) return;
+    clearTimeout(yourCodeTimer);
+    yourCodeTimer = setTimeout(() => { try { localStorage.setItem(YOUR_CODE_KEY, code); } catch (_) {} }, 300);
+  }
   examplesSel.addEventListener("change", () => {
-    if (examplesSel.value === "custom") return;
-    editor.value = examples[Number(examplesSel.value)].code;
+    if (examplesSel.value === "custom") {
+      if (yourCode == null || yourCode === editor.value) return;
+      editor.value = yourCode;
+    } else {
+      editor.value = examples[Number(examplesSel.value)].code;
+    }
     editor.scrollTop = 0;
     moved.clear();
     useColorsFor(editor.value, { carry: false });
@@ -258,9 +274,12 @@
   // Starting code: your last code if there is one, otherwise the first example.
   // A shared link (read below, before the first run) replaces it.
   {
-    let last = null;
-    try { last = localStorage.getItem("dsaviz-last-code"); } catch (_) {}
+    let last = null, saved = null;
+    try { last = localStorage.getItem("dsaviz-last-code"); saved = localStorage.getItem(YOUR_CODE_KEY); } catch (_) {}
     const i = last == null ? 0 : examples.findIndex((ex) => ex.code === last);
+    // Older versions only kept the last code; if that wasn't an example, it was yours.
+    if (saved != null) yourCode = saved;
+    else if (last != null && i < 0) saveYourCode(last);
     if (last != null && i < 0) { editor.value = last; examplesSel.value = "custom"; }
     else if (examples.length) { editor.value = examples[Math.max(0, i)].code; examplesSel.value = String(Math.max(0, i)); }
   }
@@ -276,6 +295,9 @@
     editor.value = shared.code;
     const ex = examples.findIndex((x) => x.code === shared.code);
     examplesSel.value = ex >= 0 ? String(ex) : "custom";
+    // Someone else's code: show it under "Your code" for now, but don't
+    // overwrite your saved code unless you edit it.
+    if (ex < 0) saveYourCode(shared.code, { persist: false });
     useColorsFor(editor.value, { carry: false });
     paintEditor();
   })();
