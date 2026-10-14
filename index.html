@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dsaviz: see your code run</title>
 <meta name="description" content="Step through Python code and watch variables, objects and pointers change. Runs entirely in your browser.">
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 <header class="top">
@@ -60,7 +60,15 @@
       <label class="check"><input type="checkbox" id="hide-defs" checked> hide functions and classes</label>
       <button id="reset-layout" title="Put dragged boxes back where they started" disabled>Reset layout</button>
     </div>
-    <div class="changes" id="changes" aria-live="polite"></div>
+    <div class="changes-dock" id="changes-dock">
+      <div class="changes-box" id="changes-box">
+        <div class="changes-head" id="changes-head">
+          <span class="changes-title">What happened</span>
+          <button id="float-btn" class="mini" title="Float this panel so you can move it anywhere">Float ⧉</button>
+        </div>
+        <div class="changes" id="changes" aria-live="polite"></div>
+      </div>
+    </div>
     <div class="viz-col">
       <div class="placeholder" id="placeholder">Loading Python…<br><span class="muted">First visit downloads about 10 MB; after that it's cached.</span></div>
       <div class="viz" id="viz">
@@ -76,7 +84,7 @@
 
 <div class="color-pop" id="color-pop" role="dialog" aria-label="Variable colours" hidden></div>
 
-<script src="examples.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<script src="examples.js?v=11"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

@@ -264,6 +264,7 @@
     $("placeholder").hidden = true;
     $("viz").hidden = false;
     render({ scroll: !keepStep || stepIndex > 0 });
+    reserveCaptionHeight();
   }
 
   // ---------- stepping ----------
@@ -302,7 +303,104 @@
   $("mode-arrows").addEventListener("click", () => setMode("arrows"));
   setMode(pointerMode);
   hideDefsBox.addEventListener("change", () => { if (result) { layout = null; render({}); } });
-  window.addEventListener("resize", () => { if (result) drawArrows(); });
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    if (result) drawArrows();
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { reserveCaptionHeight(); keepFloatOnScreen(); }, 150);
+  });
+
+  // ---------- caption box: steady height, and floating ----------
+  // The explanation can be 1 to several lines. To stop the drawing below it from
+  // jumping as you step, every step's caption is measured once per run (off
+  // screen, at the box's current width) and the box keeps the tallest height.
+  function reserveCaptionHeight() {
+    const box = $("changes");
+    if (!result || $("changes-box").classList.contains("floating")) { box.style.minHeight = ""; return; }
+    const m = document.createElement("div");
+    m.className = "changes changes-measure";
+    m.style.width = box.clientWidth + "px";
+    document.body.appendChild(m);
+    let tallest = 0;
+    for (let i = 0; i < result.steps.length; i++) {
+      const prev = i > 0 ? result.steps[i - 1] : null, cur = result.steps[i];
+      m.innerHTML = captionHTML(prev, cur, diffSteps(prev, cur));
+      tallest = Math.max(tallest, m.offsetHeight);
+    }
+    m.remove();
+    box.style.minHeight = tallest + "px";
+  }
+
+  const FLOAT_KEY = "dsaviz-caption-float";
+  function floatState() { try { return JSON.parse(localStorage.getItem(FLOAT_KEY) || "null"); } catch (_) { return null; } }
+  function saveFloat(st) { try { localStorage.setItem(FLOAT_KEY, JSON.stringify(st)); } catch (_) {} }
+  function keepFloatOnScreen() {
+    const b = $("changes-box");
+    if (!b.classList.contains("floating")) return;
+    const w = b.offsetWidth, h = b.offsetHeight;
+    const x = Math.min(Math.max(0, b.offsetLeft), Math.max(0, window.innerWidth - w));
+    const y = Math.min(Math.max(0, b.offsetTop), Math.max(0, window.innerHeight - Math.min(h, 60)));
+    b.style.left = x + "px"; b.style.top = y + "px";
+  }
+  function setFloating(on, st) {
+    const b = $("changes-box");
+    b.classList.toggle("floating", on);
+    $("float-btn").textContent = on ? "Dock ⤓" : "Float ⧉";
+    $("float-btn").title = on ? "Put this panel back above the drawing" : "Float this panel so you can move it anywhere";
+    if (on) {
+      const r = b.getBoundingClientRect();
+      const s = st || { x: Math.max(8, window.innerWidth - 400), y: Math.max(8, r.top), w: 380, h: null };
+      b.style.left = s.x + "px"; b.style.top = s.y + "px"; b.style.width = (s.w || 380) + "px";
+      b.style.height = s.h ? s.h + "px" : "";
+      keepFloatOnScreen();
+      saveFloat({ on: true, x: b.offsetLeft, y: b.offsetTop, w: b.offsetWidth, h: s.h || null });
+    } else {
+      b.style.left = b.style.top = b.style.width = b.style.height = "";
+      const old = floatState();
+      saveFloat({ ...(old || {}), on: false });
+    }
+    reserveCaptionHeight();
+    if (result) drawArrows();
+  }
+  $("float-btn").addEventListener("click", () => {
+    const on = !$("changes-box").classList.contains("floating");
+    const old = floatState();
+    setFloating(on, on && old && old.x != null ? old : null);
+  });
+  (function enableFloatDrag() {
+    const b = $("changes-box"), head = $("changes-head");
+    let d = null;
+    head.addEventListener("pointerdown", (e) => {
+      if (!b.classList.contains("floating") || e.target.closest("button")) return;
+      e.preventDefault();
+      d = { px: e.clientX, py: e.clientY, x: b.offsetLeft, y: b.offsetTop };
+      head.setPointerCapture(e.pointerId);
+    });
+    head.addEventListener("pointermove", (e) => {
+      if (!d) return;
+      b.style.left = d.x + e.clientX - d.px + "px";
+      b.style.top = d.y + e.clientY - d.py + "px";
+      keepFloatOnScreen();
+    });
+    const end = () => {
+      if (!d) return;
+      d = null;
+      saveFloat({ on: true, x: b.offsetLeft, y: b.offsetTop, w: b.offsetWidth, h: b.style.height ? b.offsetHeight : null });
+    };
+    head.addEventListener("pointerup", end);
+    head.addEventListener("pointercancel", end);
+    // remember a resize from the corner handle
+    if (window.ResizeObserver) {
+      let t = null;
+      new ResizeObserver(() => {
+        if (!b.classList.contains("floating")) return;
+        clearTimeout(t);
+        t = setTimeout(() => saveFloat({ on: true, x: b.offsetLeft, y: b.offsetTop, w: b.offsetWidth, h: b.offsetHeight }), 200);
+      }).observe(b);
+    }
+    const st = floatState();
+    if (st && st.on) setFloating(true, st);
+  })();
 
   // ---------- values ----------
   function isHidden(heap, id) {
@@ -521,7 +619,11 @@
         if (isRef(d.after)) {
           const o = h[d.after[1]];
           const what = o && o.items ? `a new ${o.type} of ${o.items.length + (o.more || 0)}` : describe(d.after, h, cur);
-          const target = varNameFor(prev, d.after[1]);   // an existing object, already known by another name
+          // An existing collection already known by another name (aliasing). Only
+          // look in frames that still exist, so a just-finished __init__'s `self`
+          // doesn't count, and only for lists/dicts, which is where aliasing surprises.
+          const live = { frames: prev.frames.filter((f) => cur.frames.some((g) => g.fid === f.fid) && f.vars.some(([n]) => n !== name)) };
+          const target = o && o.items ? varNameFor(live, d.after[1]) : null;
           out.push(d.kind === "v"
             ? `New variable ${c(name)} points to ${target && target !== name ? c(target) + (o && o.items ? ` (the same ${o.type}, not a copy)` : "") : c(what)}.`
             : `${c(name)} now points to ${c(target || describe(d.after, h, cur))}.`);

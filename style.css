@@ -132,8 +132,19 @@ button:disabled { opacity: .5; cursor: default; }
 kbd { font-family: var(--mono); font-size: 12px; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
 
 /* what changed */
-.changes { margin: 0 0 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
-  padding: 9px 14px; font-size: 14px; line-height: 1.55; min-height: 62px; }
+.changes-dock { margin: 0 0 10px; }
+.changes-box { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; }
+.changes-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 0 14px; }
+.changes-title { font-size: 12px; color: var(--muted); letter-spacing: .2px; }
+button.mini { font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+.changes { padding: 2px 14px 9px; font-size: 14px; line-height: 1.55; }
+/* floating: a small window you can drag by its header and resize from the corner */
+.changes-box.floating { position: fixed; z-index: 40; width: 380px; min-width: 240px; min-height: 80px; max-height: 70vh;
+  resize: both; overflow: auto; box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+.changes-box.floating .changes-head { cursor: move; user-select: none; touch-action: none; background: var(--soft);
+  padding-bottom: 4px; border-bottom: 1px solid var(--border); position: sticky; top: 0; }
+.changes-box.floating .changes { min-height: 0 !important; padding-top: 6px; }
+.changes-measure { position: absolute; left: -10000px; top: 0; visibility: hidden; pointer-events: none; }
 .changes .ran { color: var(--muted); font-size: 13px; }
 .changes ul { margin: 4px 0 0; padding-left: 18px; }
 .changes li { margin: 1px 0; }
