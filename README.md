@@ -26,6 +26,8 @@ Everything is on one page: code on the left, the drawing on the right.
 4. Drag any box to rearrange the drawing. Moved boxes stay put while you step and while you edit; **Reset layout** puts them back.
 5. **Copy link** puts your code in the URL, so you can share or bookmark it. Your code never leaves your browser.
 
+After a refresh you're back on the same code, at the step you were on, with your colours.
+
 The first visit downloads Python (about 10 MB). After that, the browser caches it.
 
 ## How it works

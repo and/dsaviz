@@ -16,6 +16,7 @@
   const editor = $("editor"), examplesSel = $("examples"), hideDefsBox = $("hide-defs");
 
   let traceFn = null;
+  let restoreStep = true;
   let result = null;           // last successful trace
   let stepIndex = 0;
   let layout = null;           // { pos: Map(id -> {r, c}), key: Map(id -> stable key) }
@@ -250,10 +251,19 @@
     try { localStorage.setItem("dsaviz-last-code", code); } catch (_) {}
     layout = null;
     stepIndex = sameShape ? Math.min(oldIndex, r.steps.length - 1) : 0;
+    // First run after the page loads: go back to the step you were on before a
+    // refresh, if it's the same code. (Just a number in localStorage, so cheap.)
+    if (restoreStep) {
+      restoreStep = false;
+      try {
+        const saved = JSON.parse(localStorage.getItem("dsaviz-last-step") || "null");
+        if (saved && saved.code === codeKey(code)) stepIndex = Math.min(Math.max(0, saved.step | 0), r.steps.length - 1);
+      } catch (_) {}
+    }
     $("slider").max = String(r.steps.length - 1);
     $("placeholder").hidden = true;
     $("viz").hidden = false;
-    render({ scroll: !keepStep });
+    render({ scroll: !keepStep || stepIndex > 0 });
   }
 
   // ---------- stepping ----------
@@ -602,6 +612,7 @@
     paintEditor();
     if (scroll) scrollLineIntoView(step.line);
     $("slider").value = String(stepIndex);
+    try { localStorage.setItem("dsaviz-last-step", JSON.stringify({ code: codeKey(ranCode || ""), step: stepIndex })); } catch (_) {}
     $("step-label").textContent = `Step ${stepIndex + 1} of ${result.steps.length}${isLast ? (result.error ? " · error" : result.truncated ? "" : " · finished") : ""}`;
     $("first").disabled = $("prev").disabled = stepIndex === 0;
     $("next").disabled = $("last").disabled = isLast;
