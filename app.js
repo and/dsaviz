@@ -429,6 +429,55 @@
     resizeTimer = setTimeout(() => { reserveCaptionHeight(); keepFloatOnScreen(); }, 150);
   });
 
+  // ---------- resizable split between code and drawing ----------
+  {
+    const ws = document.querySelector(".workspace"), split = $("splitter"), left = document.querySelector(".workspace > .left");
+    const KEY = "dsaviz-split", MIN_LEFT = 300, MIN_RIGHT = 360;
+    const apply = (frac, save) => {
+      if (frac == null) { ws.style.removeProperty("--left-w"); if (save) { try { localStorage.removeItem(KEY); } catch (_) {} } }
+      else {
+        const inner = ws.clientWidth - 32 - 18;               // padding + splitter
+        const px = Math.max(MIN_LEFT, Math.min(inner - MIN_RIGHT, frac * inner));
+        frac = px / inner;
+        ws.style.setProperty("--left-w", `calc((100% - 18px) * ${frac.toFixed(4)})`);
+        if (save) { try { localStorage.setItem(KEY, frac.toFixed(4)); } catch (_) {} }
+      }
+      window.dispatchEvent(new Event("resize"));              // redraw arrows, caption height
+    };
+    let saved = null;
+    try { saved = parseFloat(localStorage.getItem(KEY)); } catch (_) {}
+    if (saved > 0 && saved < 1) ws.style.setProperty("--left-w", `calc((100% - 18px) * ${saved})`);
+
+    const fracAt = (clientX) => {
+      const r = ws.getBoundingClientRect();
+      return (clientX - r.left - 16 - 7) / (ws.clientWidth - 32 - 18);
+    };
+    split.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      split.setPointerCapture(e.pointerId);
+      split.classList.add("dragging"); document.body.classList.add("resizing");
+      const move = (ev) => apply(fracAt(ev.clientX), false);
+      const up = (ev) => {
+        split.removeEventListener("pointermove", move);
+        split.removeEventListener("pointerup", up);
+        split.removeEventListener("pointercancel", up);
+        split.classList.remove("dragging"); document.body.classList.remove("resizing");
+        apply(fracAt(ev.clientX), true);
+      };
+      split.addEventListener("pointermove", move);
+      split.addEventListener("pointerup", up);
+      split.addEventListener("pointercancel", up);
+    });
+    split.addEventListener("dblclick", () => apply(null, true));
+    split.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault(); e.stopPropagation();
+      const inner = ws.clientWidth - 32 - 18;
+      apply((left.offsetWidth + (e.key === "ArrowLeft" ? -24 : 24)) / inner, true);
+    });
+  }
+
   // ---------- caption box: steady height, and floating ----------
   // The explanation can be 1 to several lines. To stop the drawing below it from
   // jumping as you step, every step's caption is measured once per run (off
