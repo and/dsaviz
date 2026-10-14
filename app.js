@@ -472,7 +472,7 @@
     if (opts.frame && pointerMode === "labels" && heap[id]) {
       return `<span class="chip${opts.changed ? " changed" : ""}"${line ? ` style="color:${line}"` : ""}>→ ${esc(shortName(heap, id))}</span>`;
     }
-    return `<span class="ptr${opts.frame ? " fptr" : ""}" data-ref="${id}"${opts.changed ? ' data-changed="1"' : ""}${line ? ` data-color="${line}"` : ""}${wasAttr}><span class="dot"${line ? ` style="background:${line}"` : ""}></span></span>`;
+    return `<span class="ptr${opts.frame ? " fptr" : ""}" data-ref="${id}"${opts.changed ? ' data-changed="1"' : ""}${opts.color && opts.color.faded ? ' data-faded="1"' : ""}${line ? ` data-color="${line}"` : ""}${wasAttr}><span class="dot"${line ? ` style="background:${line}"` : ""}></span></span>`;
   }
 
   function childRefs(o) {
@@ -527,7 +527,7 @@
       head = o.cls || "object"; body = `<div class="plain">${esc(o.repr || "")}</div>`;
     }
     const tagHTML = tags && tags.length
-      ? `<div class="tags">${tags.map((t) => `<span class="ptag${t.local ? " local" : ""}${t.changed ? " changed" : ""}" data-frame="${esc(t.frame)}" data-var="${esc(t.name)}" title="${t.name === "return" ? "return value" : `variable in ${esc(t.frame)}, click to colour it`}"${tagStyle(t)}>${esc(t.name)}</span>`).join("")}</div>`
+      ? `<div class="tags">${tags.map((t) => `<span class="ptag${t.local ? " local" : ""}${t.changed ? " changed" : ""}${t.color && t.color.faded ? " faded" : ""}" data-frame="${esc(t.frame)}" data-var="${esc(t.name)}" title="${t.name === "return" ? "return value" : `variable in ${esc(t.frame)}, click to colour it`}"${tagStyle(t)}>${esc(t.name)}</span>`).join("")}</div>`
       : "";
     return `<div class="obj" data-id="${id}">${tagHTML}<div class="obj-head">${esc(head)}</div>${body}</div>`;
   }
@@ -738,10 +738,11 @@
           tags.get(v[1]).push({ name, frame: f.name, local: fi === lastFrame && fi > 0, changed: ch, color: colorFor(f.name, name) });
         }
         const col = colorFor(f.name, name);
-        if (col && col.border && v[0] === "ref" && heap[v[1]] && !boxBorder.has(v[1])) boxBorder.set(v[1], col.border);
+        if (col && col.border && !col.faded && v[0] === "ref" && heap[v[1]] && !boxBorder.has(v[1])) boxBorder.set(v[1], col.border);
         const rowStyle = col && col.border ? ` style="box-shadow: inset 0 0 0 2px ${col.border}"` : "";
+        const fadedRow = col && col.faded;
         const swatch = col && (col.line || col.border) ? `<span class="swatch" style="background:${col.line || "transparent"};border-color:${col.border || col.line}"></span>` : "";
-        return `<div class="vrow${ch ? " changed" : ""}"${rowStyle}><button class="vname" data-frame="${esc(f.name)}" data-var="${esc(name)}" title="Choose colours for ${esc(name)}">${swatch}${esc(name)}</button>${valueHTML(v, heap, { frame: true, changed: ch, was: ch ? diff.old.get(key) : null, color: col })}</div>`;
+        return `<div class="vrow${ch ? " changed" : ""}${fadedRow ? " faded" : ""}"${rowStyle}><button class="vname" data-frame="${esc(f.name)}" data-var="${esc(name)}" title="Choose colours for ${esc(name)}">${swatch}${esc(name)}</button>${valueHTML(v, heap, { frame: true, changed: ch, was: ch ? diff.old.get(key) : null, color: col })}</div>`;
       }).join("");
       let ret = "";
       if (f.returning) {
@@ -759,6 +760,12 @@
     const visible = Object.keys(heap).filter((id) => heap[id] && !isHidden(heap, id) && layout.pos.has(id));
     const heapEl = $("heap");
     heapEl.innerHTML = visible.map((id) => objectHTML(id, heap[id], heap, diff, tags.get(id))).join("");
+    heapEl.querySelectorAll(".obj").forEach((el) => {
+      const c = colors["box|" + layout.key.get(el.dataset.id)];
+      if (c && c.faded) el.classList.add("faded");
+    });
+    const anyFaded = Object.values(colors).some((c) => c.faded);
+    $("unfade-all").disabled = !anyFaded;
     boxBorder.forEach((c, id) => {
       const el = heapEl.querySelector(`.obj[data-id="${id}"]`);
       if (el) { el.style.borderColor = c; el.style.boxShadow = `0 0 0 2px ${c}`; }
@@ -808,7 +815,7 @@
     // A solid triangle, sized in screen pixels (not scaled by line thickness), so a
     // thick highlighted arrow gets the same tidy head as a thin one.
     const marker = (id, color) => `<marker id="${id}" viewBox="0 0 10 10" refX="9.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M0.5 1 L9.5 5 L0.5 9 Z" fill="${color}"/></marker>`;
-    let ghosts = "", normal = "", colored = "", hot = "";
+    let ghosts = "", dim = "", normal = "", colored = "", hot = "";
     const customMarkers = new Map();
     // Arrows always leave the dot heading right.
     // "smart" routing picks the side of the target box that keeps the arrow clear:
@@ -865,6 +872,10 @@
       const target = viz.querySelector(`.obj[data-id="${ptr.dataset.ref}"]`);
       if (!target) return;
       const p = curve(ptr, target);
+      if (ptr.dataset.faded || ptr.closest(".obj.faded")) {
+        dim += `<path d="${p.d}" fill="none" stroke="${ptr.dataset.color || "var(--arrow)"}" stroke-width="1.5" opacity=".2" marker-end="url(#head-dim)"/>`;
+        return;
+      }
       const col = ptr.dataset.color;
       if (col) {
         const mid = "head-" + col.replace(/[^a-z0-9]/gi, "");
@@ -878,7 +889,7 @@
         normal += `<circle cx="${p.sx}" cy="${p.sy}" r="3" fill="var(--arrow)"/><path d="${p.d}" fill="none" stroke="var(--arrow)" stroke-width="1.5" marker-end="url(#head)"/>`;
       }
     });
-    svg.innerHTML = `<defs>${marker("head", "var(--arrow)")}${marker("head-hot", "var(--hot)")}${marker("head-ghost", "var(--ghost)")}${[...customMarkers.values()].join("")}</defs>${ghosts}${normal}${colored}${hot}`;
+    svg.innerHTML = `<defs>${marker("head", "var(--arrow)")}${marker("head-hot", "var(--hot)")}${marker("head-ghost", "var(--ghost)")}${[...customMarkers.values()].join("")}${marker("head-dim", "var(--ghost)")}</defs>${dim}${ghosts}${normal}${colored}${hot}`;
   }
 
   // ---------- colour picker ----------
@@ -901,7 +912,25 @@
     pop.innerHTML = `<div class="pop-title"><code>${esc(name)}</code> <span class="muted">in ${esc(frameName)}</span></div>
       <div class="pop-label">Line <span class="muted">(arrow and name tag)</span></div><div class="pop-row">${swatchRow("line", c.line)}</div>
       <div class="pop-label">Border <span class="muted">(around the variable and its box)</span></div><div class="pop-row">${swatchRow("border", c.border)}</div>
+      <div class="pop-label">Focus</div><div class="pop-row">
+        <button class="pop-fade${c.faded ? " on" : ""}" aria-pressed="${!!c.faded}">${c.faded ? "Faded" : "Fade"} ◐</button>
+        <button class="pop-focus" title="Fade every other variable so this one stands out">Fade all others</button></div>
       <div class="pop-foot"><span class="muted">Saved for this code in this browser.</span><button class="pop-reset">Reset</button></div>`;
+    placePop(anchor);
+  }
+  // Boxes (nodes, lists, ...) can be faded too: click a box's header.
+  function openBoxPicker(id, anchor) {
+    const key = layout && layout.key.get(id);
+    if (!key) return;
+    popTarget = "box|" + key;
+    const c = colors[popTarget] || {};
+    const step = result.steps[stepIndex];
+    pop.innerHTML = `<div class="pop-title"><code>${esc(shortName(step.heap, id, step))}</code> <span class="muted">box</span></div>
+      <div class="pop-row"><button class="pop-fade${c.faded ? " on" : ""}" aria-pressed="${!!c.faded}">${c.faded ? "Faded" : "Fade this box"} ◐</button></div>
+      <div class="pop-foot"><span class="muted">Fades the box and the arrows leaving it.</span><button class="pop-reset">Reset</button></div>`;
+    placePop(anchor);
+  }
+  function placePop(anchor) {
     pop.hidden = false;
     const r = anchor.getBoundingClientRect();
     const w = pop.offsetWidth, hgt = pop.offsetHeight;
@@ -915,7 +944,7 @@
     if (!popTarget) return;
     const c = { ...(colors[popTarget] || {}) };
     if (value) c[kind] = value; else delete c[kind];
-    if (c.line || c.border) colors[popTarget] = c; else delete colors[popTarget];
+    if (c.line || c.border || c.faded) colors[popTarget] = c; else delete colors[popTarget];
     saveColors();
     pop.querySelectorAll(`.sw[data-kind="${kind}"]`).forEach((b) => b.classList.toggle("on", b.dataset.c === (value || "")));
     if (result) render({});
@@ -924,12 +953,45 @@
     const b = e.target.closest("button.sw");
     if (b) setColor(b.dataset.kind, b.dataset.c);
     if (e.target.closest(".pop-reset") && popTarget) { delete colors[popTarget]; saveColors(); if (result) render({}); closePicker(); }
+    const fade = e.target.closest(".pop-fade");
+    if (fade && popTarget) {
+      const c = { ...(colors[popTarget] || {}) };
+      if (c.faded) delete c.faded; else c.faded = true;
+      if (c.line || c.border || c.faded) colors[popTarget] = c; else delete colors[popTarget];
+      saveColors();
+      fade.classList.toggle("on", !!c.faded);
+      fade.setAttribute("aria-pressed", String(!!c.faded));
+      fade.textContent = c.faded ? "Faded ◐" : (popTarget.startsWith("box|") ? "Fade this box ◐" : "Fade ◐");
+      if (result) render({});
+    }
+    if (e.target.closest(".pop-focus") && popTarget && result) {
+      // fade every variable in the current step except this one
+      const step = result.steps[stepIndex];
+      step.frames.forEach((f) => f.vars.forEach(([n]) => {
+        const k = `${f.name}|${n}`;
+        const c = { ...(colors[k] || {}) };
+        if (k === popTarget) delete c.faded; else c.faded = true;
+        if (c.line || c.border || c.faded) colors[k] = c; else delete colors[k];
+      }));
+      saveColors();
+      render({});
+      closePicker();
+    }
   });
   pop.addEventListener("input", (e) => { if (e.target.type === "color") setColor(e.target.dataset.kind, e.target.value); });
   document.addEventListener("pointerdown", (e) => {
-    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("[data-var]")) closePicker();
+    if (!pop.hidden && !pop.contains(e.target) && !e.target.closest("[data-var]") && !e.target.closest(".obj-head")) closePicker();
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pop.hidden) closePicker(); });
+  $("unfade-all").addEventListener("click", () => {
+    for (const k of Object.keys(colors)) {
+      const c = { ...colors[k] };
+      delete c.faded;
+      if (c.line || c.border) colors[k] = c; else delete colors[k];
+    }
+    saveColors();
+    if (result) render({});
+  });
   $("frames").addEventListener("click", (e) => {
     const b = e.target.closest(".vname[data-var]");
     if (b) openPicker(b.dataset.frame, b.dataset.var, b);
@@ -948,7 +1010,7 @@
       if (!el || e.button !== 0 || !layout) return;
       e.preventDefault();
       drag = { el, key: layout.key.get(el.dataset.id), px: e.clientX, py: e.clientY, x: el.offsetLeft, y: el.offsetTop,
-               tag: e.target.closest(".ptag[data-var]"), movedPx: 0 };
+               tag: e.target.closest(".ptag[data-var]"), head: e.target.closest(".obj-head"), movedPx: 0 };
       el.classList.add("dragging");
       el.setPointerCapture(e.pointerId);
     });
@@ -971,9 +1033,10 @@
     const end = (e) => {
       if (!drag) return;
       drag.el.classList.remove("dragging");
-      const tag = drag.tag, tapped = !drag.didMove && e.type === "pointerup";
+      const tag = drag.tag, head = drag.head, id = drag.el.dataset.id, tapped = !drag.didMove && e.type === "pointerup";
       drag = null;
       if (tapped && tag && tag.dataset.var !== "return") openPicker(tag.dataset.frame, tag.dataset.var, tag);
+      else if (tapped && head) openBoxPicker(id, head);
     };
     heapEl.addEventListener("pointerup", end);
     heapEl.addEventListener("pointercancel", end);

@@ -198,3 +198,10 @@ button.mini { font-size: 12px; padding: 2px 8px; border-radius: 6px; }
 
 .version { display: inline-block; margin-top: 6px; font-family: var(--mono); font-size: 12px; color: var(--muted); text-decoration: none; }
 .version:hover { color: var(--accent); text-decoration: underline; }
+
+/* fading, to focus on some variables */
+.vrow.faded, .ptag.faded, .obj.faded { opacity: .28; transition: opacity .15s; }
+.vrow.faded:hover, .ptag.faded:hover, .obj.faded:hover { opacity: .75; }
+.obj-head { cursor: pointer; }
+.pop-fade.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.color-pop .pop-row button:not(.sw) { font-size: 13px; padding: 4px 10px; }
