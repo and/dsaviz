@@ -139,8 +139,30 @@
       e.preventDefault();
       clearTimeout(rerunTimer);
       run({ keepStep: true });
+    } else if (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.isComposing) {
+      // Keep the current line's indentation; indent one level after a line
+      // ending in ":" and drop one level after return/pass/break/continue/raise.
+      e.preventDefault();
+      const { selectionStart: a, value } = editor;
+      const lineStart = value.lastIndexOf("\n", a - 1) + 1;
+      const before = value.slice(lineStart, a);
+      let indent = before.match(/^[ \t]*/)[0];
+      const code = before.replace(/#.*$/, "").trimEnd();
+      if (code.endsWith(":")) indent += "  ";
+      else if (/^\s*(return|pass|break|continue|raise)\b/.test(code)) indent = indent.slice(0, Math.max(0, indent.length - 2));
+      insertAtCaret("\n" + indent);
     }
   });
+  // Insert text at the caret, keeping the browser's undo history when possible.
+  function insertAtCaret(text) {
+    editor.focus();
+    if (!document.execCommand || !document.execCommand("insertText", false, text)) {
+      const { selectionStart: a, selectionEnd: b, value } = editor;
+      editor.value = value.slice(0, a) + text + value.slice(b);
+      editor.selectionStart = editor.selectionEnd = a + text.length;
+      editor.dispatchEvent(new Event("input"));
+    }
+  }
 
   // ---------- examples & share links ----------
   const examples = window.DSAVIZ_EXAMPLES || [];
