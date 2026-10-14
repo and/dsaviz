@@ -65,6 +65,8 @@ ln -s node_modules/pyodide _pyodide
 # open http://localhost:8000/?pyodide=/_pyodide/
 ```
 
+When you change `app.js`, `style.css`, `examples.js` or `tracer.py`, bump the `?v=` number on their links in `index.html` (and the `tracer.py?v=` fetch in `app.js`). GitHub Pages and browsers cache these files for a while, and without a new number a visitor can get the new page with old code.
+
 Run the tracer tests:
 
 ```sh
