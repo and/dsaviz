@@ -205,3 +205,8 @@ button.mini { font-size: 12px; padding: 2px 8px; border-radius: 6px; }
 .obj-head { cursor: pointer; }
 .pop-fade.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .color-pop .pop-row button:not(.sw) { font-size: 13px; padding: 4px 10px; }
+
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 60; max-width: min(560px, calc(100vw - 32px));
+  display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px 10px 16px; border-radius: 10px;
+  background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn); font-size: 14px; line-height: 1.5;
+  box-shadow: 0 6px 24px rgba(0,0,0,.15); }

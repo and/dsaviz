@@ -76,8 +76,6 @@
 
   // ---------- helpers ----------
   const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
-  const b64encode = (s) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  const b64decode = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0)));
 
   // ---------- editor ----------
   const LINE_H = 21, PAD = 12;   // must match --lh / --pad in style.css
@@ -163,20 +161,81 @@
     run({ keepStep: false });
   });
 
-  $("share").addEventListener("click", (e) => {
-    const url = `${location.origin}${location.pathname}#code=${b64encode(editor.value)}`;
+  // ---------- share links ----------
+  // The code travels inside the link, after the #, so nothing is stored on a
+  // server. Format:  #z=<code>&n=<length>&k=<checksum>
+  //   z  the code, compressed with DEFLATE (the browser's built-in
+  //      CompressionStream) and written in URL-safe base64
+  //   n  the code's length, and k a checksum of it (codeKey), so a link that a
+  //      chat app or email cut short is spotted instead of loading broken code
+  // Older links (#code=<plain base64>) still open.
+  const toB64url = (bytes) => {
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  };
+  const fromB64url = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0));
+  async function pipeBytes(bytes, stream) {
+    return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+  }
+  async function makeShareHash(code) {
+    const check = `n=${code.length}&k=${codeKey(code)}`;
+    const raw = new TextEncoder().encode(code);
+    if ("CompressionStream" in window) {
+      try { return `#z=${toB64url(await pipeBytes(raw, new CompressionStream("deflate-raw")))}&${check}`; } catch (_) {}
+    }
+    return `#code=${toB64url(raw)}&${check}`;
+  }
+  // -> { code } when the link is good, { damaged: true } when it isn't, null when there's no code in it
+  async function readShareHash(hash) {
+    const p = new URLSearchParams(hash.replace(/^#/, ""));
+    if (!p.has("z") && !p.has("code")) return null;
+    try {
+      let code;
+      if (p.has("z")) code = new TextDecoder("utf-8", { fatal: true }).decode(await pipeBytes(fromB64url(p.get("z")), new DecompressionStream("deflate-raw")));
+      else code = new TextDecoder("utf-8", { fatal: true }).decode(fromB64url(p.get("code")));
+      if (p.has("n") && Number(p.get("n")) !== code.length) return { damaged: true };
+      if (p.has("k") && p.get("k") !== codeKey(code)) return { damaged: true };
+      return { code };
+    } catch (_) {
+      return { damaged: true };
+    }
+  }
+
+  function toast(text, ms = 10000) {
+    const t = $("toast");
+    t.querySelector(".toast-text").textContent = text;
+    t.hidden = false;
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.hidden = true; }, ms);
+  }
+  $("toast").querySelector(".toast-close").addEventListener("click", () => { $("toast").hidden = true; });
+
+  // Build the link in the background after each run, so clicking the button can
+  // copy it straight away (some browsers only allow copying right after a click).
+  let shareReady = { code: null, hash: null };
+  function prepareShare(code) {
+    makeShareHash(code).then((hash) => { if (editor.value === code) shareReady = { code, hash }; });
+  }
+  $("share").addEventListener("click", async (e) => {
+    const btn = e.currentTarget, code = editor.value;
+    const hash = shareReady.code === code ? shareReady.hash : await makeShareHash(code);
+    const url = `${location.origin}${location.pathname}${hash}`;
     history.replaceState(null, "", url);
-    if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
-    const btn = e.target, old = btn.textContent;
-    btn.textContent = "Link copied";
-    setTimeout(() => { btn.textContent = old; }, 1500);
+    let copied = false;
+    try { await navigator.clipboard.writeText(url); copied = true; } catch (_) {}
+    btn.textContent = copied ? `Link copied (${url.length} chars)` : "Link is in the address bar";
+    setTimeout(() => { btn.textContent = "Copy link"; }, 2200);
+  });
+  // Once you edit, a code link in the address bar is out of date. Drop it, so a
+  // refresh brings back your latest code (saved locally) rather than the old link.
+  editor.addEventListener("input", () => {
+    if (/(^#|&)(z|code)=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
   });
 
-  const hashMatch = location.hash.match(/code=([^&]+)/);
-  if (hashMatch) {
-    try { editor.value = b64decode(hashMatch[1]); examplesSel.value = "custom"; }
-    catch (_) { editor.value = examples[0].code; examplesSel.value = "0"; }
-  } else {
+  // Starting code: your last code if there is one, otherwise the first example.
+  // A shared link (read below, before the first run) replaces it.
+  {
     let last = null;
     try { last = localStorage.getItem("dsaviz-last-code"); } catch (_) {}
     const i = last == null ? 0 : examples.findIndex((ex) => ex.code === last);
@@ -184,6 +243,20 @@
     else if (examples.length) { editor.value = examples[Math.max(0, i)].code; examplesSel.value = String(Math.max(0, i)); }
   }
   useColorsFor(editor.value, { carry: false });
+  const initialCode = (async () => {
+    const shared = await readShareHash(location.hash);
+    if (!shared) return;
+    if (shared.damaged) {
+      history.replaceState(null, "", location.pathname + location.search);
+      toast("This link looks incomplete or damaged (it may have been cut short when it was shared), so its code wasn't loaded. Ask for the link again, or make sure the whole link is copied.");
+      return;
+    }
+    editor.value = shared.code;
+    const ex = examples.findIndex((x) => x.code === shared.code);
+    examplesSel.value = ex >= 0 ? String(ex) : "custom";
+    useColorsFor(editor.value, { carry: false });
+    paintEditor();
+  })();
   $("viz").hidden = true;
   $("app-version").textContent = `dsaviz v${APP_VERSION}`;
   paintEditor();
@@ -206,6 +279,7 @@
       ns.set("__name__", "dsaviz_tracer");
       pyodide.runPython(src, { globals: ns });
       traceFn = ns.get("trace");
+      await initialCode;
       run({ keepStep: false });
     } catch (err) {
       $("placeholder").innerHTML = `Python failed to load.<br><span class="muted">${esc(err.message || err)}</span>`;
@@ -248,6 +322,7 @@
     result = r;
     ranCode = code;
     useColorsFor(code, { carry: true });
+    prepareShare(code);
     try { localStorage.setItem("dsaviz-last-code", code); } catch (_) {}
     layout = null;
     stepIndex = sameShape ? Math.min(oldIndex, r.steps.length - 1) : 0;

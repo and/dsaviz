@@ -26,7 +26,7 @@ Everything is on one page: code on the left, the drawing on the right.
 3. Click a variable's name, in its frame or on its name tag, to give it its own colours: a **line** colour for its arrow and name tag, and a **border** colour around the variable and the box it points to. Colours are saved per program in your browser (with your last code), so they're still there after a refresh, and they follow the program while you edit it.
    The same panel can **Fade** a variable (its row, name tag and arrow go faint) or **Fade all others** to focus on one. Click a box's header to fade that box and the arrows leaving it. **Show all** brings everything back. Fading is saved per program too.
 4. Drag any box to rearrange the drawing. Moved boxes stay put while you step and while you edit; **Reset layout** puts them back.
-5. **Copy link** puts your code in the URL, so you can share or bookmark it. Your code never leaves your browser.
+5. **Copy link** puts your code in the URL, so you can share or bookmark it. The code is compressed (DEFLATE, built into the browser) to keep links short, and the link carries the code's length and a checksum, so a link that got cut short when it was shared shows a warning instead of loading broken code. Older plain `#code=` links still open. Editing the code removes the link from the address bar, so a refresh shows your latest version.
 
 After a refresh you're back on the same code, at the step you were on, with your colours.
 
