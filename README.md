@@ -18,6 +18,9 @@ Everything is on one page: code on the left, the drawing on the right.
 
 1. Pick an example or type your own code. The drawing updates a moment after you stop typing (Ctrl/⌘ + Enter re-runs straight away). If you're mid-edit and the code doesn't parse, the last working drawing stays up and the bad line is marked.
 2. Step with **Next / Prev**, the slider, or the ← → keys. The editor highlights the line that just ran and the one that runs next.
+   - The box above the drawing says, in plain English, what the last line did ("`Node 'x'.next` now points to `Node 'b'` (was Node 'y')").
+   - Whatever changed is coral: the pointer that moved, values that changed, and name tags that moved. A dashed grey line shows where a pointer used to go.
+   - **Labels** (the default) shows variables as name tags on the box they point to, so only links between objects are drawn as arrows. **Arrows** draws every variable as an arrow, like Python Tutor.
 3. Drag any box to rearrange the drawing. Moved boxes stay put while you step and while you edit; **Reset layout** puts them back.
 4. **Copy link** puts your code in the URL, so you can share or bookmark it. Nothing is stored anywhere.
 
@@ -69,5 +72,7 @@ python3 -m unittest discover -s tests
 ## Credits
 
 Inspired by Philip Guo's [Python Tutor](https://pythontutor.com). Python in the browser by [Pyodide](https://pyodide.org).
+
+See [WISHLIST.md](WISHLIST.md) for what's planned next.
 
 MIT licence.

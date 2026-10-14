@@ -36,6 +36,7 @@ class Tracer:
         self.steps = []
         self.stdout = io.StringIO()
         self.keepalive = []          # stops ids being reused mid-trace
+        self.frame_ids = {}          # frame -> small stable number, so steps can be compared
         self.globals = {"__name__": "__main__", "__builtins__": __builtins__}
 
     # ---------- encoding ----------
@@ -96,8 +97,10 @@ class Tracer:
 
     @staticmethod
     def is_class_body(frame):
-        loc = frame.f_locals
-        return "__module__" in loc and "__qualname__" in loc and frame.f_code.co_name != "<module>"
+        # Function bodies are compiled with CO_OPTIMIZED; module and class bodies
+        # aren't. (Checking f_locals for __module__ misses the class body's very
+        # first event, before Python has filled it in.)
+        return not (frame.f_code.co_flags & 0x1) and frame.f_code.co_name != "<module>"
 
     @staticmethod
     def visible(name, value):
@@ -116,7 +119,9 @@ class Tracer:
             variables = [[name, self.encode(value, heap)]
                          for name, value in list(source.items())
                          if self.visible(name, value)]
+            fid = self.frame_ids.setdefault(f, len(self.frame_ids))
             entry = {
+                "fid": fid,
                 "name": "Global frame" if is_module else f.f_code.co_name,
                 "vars": variables,
             }

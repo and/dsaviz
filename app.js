@@ -18,6 +18,10 @@
   // Boxes the user dragged, keyed by creation order ("3rd object made"), not by
   // memory id, so a moved box stays put when the code is edited and re-run.
   const moved = new Map();     // key -> {x, y}
+  // "labels": variables appear as name tags on the box they point to (fewer arrows).
+  // "arrows": every variable draws an arrow, like Python Tutor.
+  let pointerMode = "labels";
+  try { pointerMode = localStorage.getItem("dsaviz-pointers") || "labels"; } catch (_) {}
 
   // ---------- helpers ----------
   const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
@@ -210,6 +214,18 @@
     if (e.key === "ArrowRight") { e.preventDefault(); go(stepIndex + 1); }
     if (e.key === "ArrowLeft") { e.preventDefault(); go(stepIndex - 1); }
   });
+  function setMode(m) {
+    pointerMode = m;
+    try { localStorage.setItem("dsaviz-pointers", m); } catch (_) {}
+    $("mode-labels").classList.toggle("on", m === "labels");
+    $("mode-arrows").classList.toggle("on", m === "arrows");
+    $("mode-labels").setAttribute("aria-pressed", String(m === "labels"));
+    $("mode-arrows").setAttribute("aria-pressed", String(m === "arrows"));
+    if (result) render({});
+  }
+  $("mode-labels").addEventListener("click", () => setMode("labels"));
+  $("mode-arrows").addEventListener("click", () => setMode("arrows"));
+  setMode(pointerMode);
   hideDefsBox.addEventListener("change", () => { if (result) { layout = null; render({}); } });
   window.addEventListener("resize", () => { if (result) drawArrows(); });
 
@@ -220,14 +236,69 @@
     return o && (o.type === "function" || o.type === "class" || o.type === "module");
   }
 
-  function valueHTML(v, heap) {
-    if (v[0] === "prim") return `<span class="val">${esc(v[1])}</span>`;
+  // A short, human name for an object, used in labels and captions: Node 'x', list[3], dict.
+  // Lists and dicts read better by the variable that holds them ("nums[3]").
+  function varNameFor(step, id) {
+    if (!step) return null;
+    for (let i = step.frames.length - 1; i >= 0; i--) {
+      const hit = step.frames[i].vars.find(([, v]) => v[0] === "ref" && v[1] === id);
+      if (hit) return hit[0];
+    }
+    return null;
+  }
+
+  function shortName(heap, id, step) {
+    const o = heap && heap[id];
+    if (!o) return "an object";
+    if (o.type === "instance") {
+      for (const k of ["val", "value", "data", "name", "key"]) {
+        const a = o.attrs.find(([n]) => n === k);
+        if (a && a[1][0] === "prim") return `${o.cls} ${a[1][1]}`;
+      }
+      return o.cls;
+    }
+    if (o.type === "function" || o.type === "class" || o.type === "module") return `${o.type} ${o.name}`;
+    if (o.items) return varNameFor(step, id) || pathName(heap, id, step, 0) || `${o.type} of ${o.items.length + (o.more || 0)}`;
+    return o.cls || "object";
+  }
+
+  // An unnamed list inside a named one reads as "grid[0]".
+  function pathName(heap, id, step, depth) {
+    if (depth > 3) return null;
+    for (const [pid, p] of Object.entries(heap)) {
+      if (!p || pid === id) continue;
+      let slot = null;
+      if (p.type === "instance") { const a = p.attrs.find(([, v]) => v[0] === "ref" && v[1] === id); if (a) slot = "." + a[0]; }
+      else if (p.type === "dict") { const a = p.items.find(([, v]) => v[0] === "ref" && v[1] === id); if (a) slot = `[${a[0][1]}]`; }
+      else if (p.items) { const i = p.items.findIndex((v) => v[0] === "ref" && v[1] === id); if (i >= 0) slot = `[${i}]`; }
+      if (slot === null) continue;
+      const base = varNameFor(step, pid) || (p.type === "instance" ? shortName(heap, pid, step) : pathName(heap, pid, step, depth + 1));
+      if (base) return base + slot;
+    }
+    return null;
+  }
+
+  function describe(v, heap, step) {
+    if (!v) return "nothing";
+    return v[0] === "prim" ? v[1] : shortName(heap, v[1], step);
+  }
+
+  // opts: { changed: bool, was: old encoded value, frame: bool }
+  function valueHTML(v, heap, opts = {}) {
+    const was = opts.was && opts.was[0] === "ref" && !(v[0] === "ref" && v[1] === opts.was[1]) ? opts.was[1] : null;
+    const wasAttr = was ? ` data-was="${was}"` : "";
+    if (v[0] === "prim") {
+      return `<span class="val">${esc(v[1])}</span>${was ? `<span class="anchor"${wasAttr}></span>` : ""}`;
+    }
     const id = v[1];
     if (isHidden(heap, id)) {
       const o = heap[id];
       return `<span class="val muted">${o.type === "class" ? "class" : "function"} ${esc(o.name)}</span>`;
     }
-    return `<span class="ptr" data-ref="${id}"><span class="dot"></span></span>`;
+    if (opts.frame && pointerMode === "labels" && heap[id]) {
+      return `<span class="chip${opts.changed ? " changed" : ""}">→ ${esc(shortName(heap, id))}</span>`;
+    }
+    return `<span class="ptr${opts.frame ? " fptr" : ""}" data-ref="${id}"${opts.changed ? ' data-changed="1"' : ""}${wasAttr}><span class="dot"></span></span>`;
   }
 
   function childRefs(o) {
@@ -240,23 +311,36 @@
     return out;
   }
 
-  function objectHTML(id, o, heap) {
+  // Each pointer-holding slot gets a stable key so two steps can be compared.
+  const fieldKey = (id, o, i, k) => o.type === "instance" ? `${id}|.${k}` : o.type === "dict" ? `${id}|{${k}}` : `${id}|[${i}]`;
+  const varKey = (f, name) => `${f.fid}|${name}`;
+
+  function objectHTML(id, o, heap, diff, tags) {
+    const cell = (key, v) => {
+      const ch = diff && diff.changed.has(key);
+      return { cls: ch ? " changed" : "", html: valueHTML(v, heap, { changed: ch, was: ch ? diff.old.get(key) : null }) };
+    };
     let head = "", body = "";
     if (o.type === "instance") {
       head = o.cls;
       body = o.attrs.length
-        ? `<table>${o.attrs.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td>${valueHTML(v, heap)}</td></tr>`).join("")}</table>`
+        ? `<table>${o.attrs.map(([k, v]) => { const c = cell(fieldKey(id, o, 0, k), v); return `<tr><td class="k">${esc(k)}</td><td class="v${c.cls}">${c.html}</td></tr>`; }).join("")}</table>`
         : `<div class="plain muted">no attributes</div>`;
     } else if (o.type === "dict") {
       head = "dict";
-      const rows = o.items.map(([k, v]) => `<tr><td class="k">${valueHTML(k, heap)}</td><td>${valueHTML(v, heap)}</td></tr>`).join("");
+      const rows = o.items.map(([k, v]) => {
+        const c = cell(fieldKey(id, o, 0, k[0] === "prim" ? k[1] : "?"), v);
+        return `<tr><td class="k">${valueHTML(k, heap)}</td><td class="v${c.cls}">${c.html}</td></tr>`;
+      }).join("");
       body = o.items.length ? `<table>${rows}</table>` : `<div class="plain muted">empty</div>`;
       if (o.more) body += `<div class="plain muted">+${o.more} more</div>`;
     } else if (o.items) {
       head = o.type;
       const showIdx = o.type === "list" || o.type === "tuple";
-      const cells = o.items.map((v, i) =>
-        `<div class="cell">${showIdx ? `<span class="idx">${i}</span>` : ""}<span class="v">${valueHTML(v, heap)}</span></div>`).join("");
+      const cells = o.items.map((v, i) => {
+        const c = cell(fieldKey(id, o, i), v);
+        return `<div class="cell${c.cls}">${showIdx ? `<span class="idx">${i}</span>` : ""}<span class="v">${c.html}</span></div>`;
+      }).join("");
       body = o.items.length ? `<div class="cells">${cells}${o.more ? `<div class="cell"><span class="v muted">+${o.more}</span></div>` : ""}</div>`
                             : `<div class="cells muted">empty</div>`;
     } else if (o.type === "function") {
@@ -268,7 +352,118 @@
     } else {
       head = o.cls || "object"; body = `<div class="plain">${esc(o.repr || "")}</div>`;
     }
-    return `<div class="obj" data-id="${id}"><div class="obj-head">${esc(head)}</div>${body}</div>`;
+    const tagHTML = tags && tags.length
+      ? `<div class="tags">${tags.map((t) => `<span class="ptag${t.local ? " local" : ""}${t.changed ? " changed" : ""}" title="variable in ${esc(t.frame)}">${esc(t.name)}</span>`).join("")}</div>`
+      : "";
+    return `<div class="obj" data-id="${id}">${tagHTML}<div class="obj-head">${esc(head)}</div>${body}</div>`;
+  }
+
+  // ---------- what changed between two steps ----------
+  function flatten(step) {
+    const slots = new Map();
+    step.frames.forEach((f) => f.vars.forEach(([name, v]) => slots.set("v:" + varKey(f, name), v)));
+    for (const [id, o] of Object.entries(step.heap)) {
+      if (!o) continue;
+      if (o.type === "instance") o.attrs.forEach(([k, v]) => slots.set("f:" + fieldKey(id, o, 0, k), v));
+      else if (o.type === "dict") o.items.forEach(([k, v]) => { if (k[0] === "prim") slots.set("f:" + fieldKey(id, o, 0, k[1]), v); });
+      else if (o.items) o.items.forEach((v, i) => slots.set("f:" + fieldKey(id, o, i), v));
+    }
+    return slots;
+  }
+  const same = (a, b) => !!a && !!b && a[0] === b[0] && a[1] === b[1];
+
+  function diffSteps(prev, cur) {
+    const changed = new Set(), old = new Map(), list = [];
+    if (!prev) return { changed, old, list };
+    const a = flatten(prev), b = flatten(cur);
+    for (const [k, v] of b) {
+      const before = a.get(k);
+      if (same(before, v)) continue;
+      // a variable that only exists because a function was just called isn't a "change"
+      if (k.startsWith("v:")) {
+        const fid = Number(k.slice(2).split("|")[0]);
+        if (!prev.frames.some((f) => f.fid === fid)) continue;
+      } else {
+        const id = k.slice(2).split("|")[0];
+        if (!prev.heap[id]) continue;   // brand-new object, nothing to compare with
+      }
+      const key = k.slice(2);
+      changed.add(key);
+      if (before) old.set(key, before);
+      list.push({ key, kind: k[0], before, after: v });
+    }
+    return { changed, old, list };
+  }
+
+  function captionHTML(prev, cur, diff) {
+    if (!prev) return `<div class="ran">Start of the program.</div><div class="none">Press <b>Next</b> or → to run the first line.</div>`;
+    const code = (ranCode || "").split("\n");
+    const ranLine = prev.line;
+    const src = (code[ranLine - 1] || "").trim();
+    const out = [];
+    const c = (s) => `<code>${esc(s)}</code>`;
+    const ph = prev.heap, h = cur.heap;
+
+    const prevIds = new Set(prev.frames.map((f) => f.fid)), curIds = new Set(cur.frames.map((f) => f.fid));
+    const finished = prev.frames.filter((f) => !curIds.has(f.fid));
+    const started = cur.frames.filter((f) => !prevIds.has(f.fid));
+    finished.forEach((f) => out.push(`${c(f.name)} finished${f.returning ? ` and returned ${c(describe(f.returning, ph, prev))}` : ""}; its frame is gone.`));
+    started.forEach((f) => {
+      const args = f.vars.map(([n, v]) => `${n}=${describe(v, h, cur)}`).join(", ");
+      out.push(`Called ${c(`${f.name}(${args})`)}. It gets its own frame.`);
+    });
+    if (cur.event === "return" && cur.frames.length > 1) {
+      const f = cur.frames[cur.frames.length - 1];
+      out.push(`${c(f.name)} is about to return ${c(describe(f.returning, h, cur))}.`);
+    }
+
+    for (const d of diff.list) {
+      if (d.after && d.after[0] === "ref" && isHidden(h, d.after[1])) {
+        const o = h[d.after[1]];
+        if (!d.before && d.kind === "v") out.push(`Defined ${o.type} ${c(o.name)}.`);
+        continue;
+      }
+      let name;
+      if (d.kind === "v") name = d.key.split("|").slice(1).join("|");
+      else {
+        const [id, slot] = [d.key.split("|")[0], d.key.split("|").slice(1).join("|")];
+        const base = shortName(h, id, cur);
+        name = slot.startsWith(".") ? `${base}${slot}` : slot.startsWith("[") ? `${base}${slot}` : `${base}[${slot.slice(1, -1)}]`;
+      }
+      const isRef = (v) => v && v[0] === "ref";
+      if (!d.before) {
+        if (isRef(d.after)) {
+          const o = h[d.after[1]];
+          const what = o && o.items ? `a new ${o.type} of ${o.items.length + (o.more || 0)}` : describe(d.after, h, cur);
+          const target = varNameFor(prev, d.after[1]);   // an existing object, already known by another name
+          out.push(d.kind === "v"
+            ? `New variable ${c(name)} points to ${target && target !== name ? c(target) + (o && o.items ? ` (the same ${o.type}, not a copy)` : "") : c(what)}.`
+            : `${c(name)} now points to ${c(target || describe(d.after, h, cur))}.`);
+        } else {
+          out.push(`Set ${c(name + " = " + describe(d.after, h, cur))}.`);
+        }
+      } else if (isRef(d.after) || isRef(d.before)) {
+        const was = isRef(d.before) ? describe(d.before, ph, prev) : d.before[1];
+        out.push(isRef(d.after)
+          ? `${c(name)} now points to ${c(describe(d.after, h, cur))} <span class="was">(was ${esc(was)})</span>.`
+          : `${c(name)} is now ${c(d.after[1])} <span class="was">(was ${esc(was)})</span>.`);
+      } else {
+        out.push(`${c(name)} changed from ${c(d.before[1])} to ${c(d.after[1])}.`);
+      }
+    }
+
+    for (const [id, o] of Object.entries(ph)) {
+      if (!o || h[id] || (o.type !== "instance" && !o.items) || isHidden(ph, id)) continue;
+      if (finished.length) continue;   // locals going away when a function returns isn't a surprise
+      out.push(`<span class="lost">${c(shortName(ph, id, prev))} is lost: nothing points to it any more.</span>`);
+    }
+    if (cur.stdout.length > prev.stdout.length) out.push(`Printed ${c(cur.stdout.slice(prev.stdout.length).replace(/\n$/, ""))}.`);
+
+    const MAX = 6;
+    const shown = out.slice(0, MAX).map((s) => `<li>${s}</li>`).join("");
+    const more = out.length > MAX ? `<li class="muted">…and ${out.length - MAX} more</li>` : "";
+    return `<div class="ran">Ran line ${ranLine}: ${c(src)}</div>` +
+      (out.length ? `<ul>${shown}${more}</ul>` : `<div class="none">No values changed. Python checked a condition or moved to the next line.</div>`);
   }
 
   // ---------- layout ----------
@@ -322,8 +517,11 @@
   // ---------- render ----------
   function render({ scroll }) {
     const step = result.steps[stepIndex];
+    const prev = stepIndex > 0 ? result.steps[stepIndex - 1] : null;
     const isLast = stepIndex === result.steps.length - 1;
     const heap = step.heap;
+    const diff = diffSteps(prev, step);
+    const labels = pointerMode === "labels";
 
     paintEditor();
     if (scroll) scrollLineIntoView(step.line);
@@ -332,6 +530,7 @@
     $("first").disabled = $("prev").disabled = stepIndex === 0;
     $("next").disabled = $("last").disabled = isLast;
     $("stdout").textContent = step.stdout;
+    $("changes").innerHTML = captionHTML(prev, step, diff);
 
     if (codeError) showBanner("error", errText(codeError) + ". Showing the last version that ran.");
     else if (isLast && result.error) showBanner("error", errText(result.error));
@@ -339,40 +538,58 @@
     else showBanner(null);
 
     // frames
-    $("frames").innerHTML = step.frames.map((f, i) => {
-      const rows = f.vars.filter(([, v]) => !(v[0] === "ref" && isHidden(heap, v[1])))
-        .map(([name, v]) => `<div class="vrow"><span class="vname">${esc(name)}</span>${valueHTML(v, heap)}</div>`).join("");
-      const ret = f.returning ? `<div class="vrow ret"><span class="vname">return value</span>${valueHTML(f.returning, heap)}</div>` : "";
-      return `<div class="frame${i === step.frames.length - 1 ? " active" : ""}"><div class="frame-name">${esc(f.name)}</div>${rows || ret ? rows + ret : '<div class="vrow muted">nothing to show yet</div>'}</div>`;
+    const tags = new Map();   // object id -> [{name, frame, local, changed}]
+    const lastFrame = step.frames.length - 1;
+    $("frames").innerHTML = step.frames.map((f, fi) => {
+      const rows = f.vars.filter(([, v]) => !(v[0] === "ref" && isHidden(heap, v[1]))).map(([name, v]) => {
+        const key = varKey(f, name), ch = diff.changed.has(key);
+        if (labels && v[0] === "ref" && heap[v[1]]) {
+          if (!tags.has(v[1])) tags.set(v[1], []);
+          tags.get(v[1]).push({ name, frame: f.name, local: fi === lastFrame && fi > 0, changed: ch });
+        }
+        return `<div class="vrow${ch ? " changed" : ""}"><span class="vname">${esc(name)}</span>${valueHTML(v, heap, { frame: true, changed: ch, was: ch ? diff.old.get(key) : null })}</div>`;
+      }).join("");
+      let ret = "";
+      if (f.returning) {
+        if (labels && f.returning[0] === "ref" && heap[f.returning[1]]) {
+          if (!tags.has(f.returning[1])) tags.set(f.returning[1], []);
+          tags.get(f.returning[1]).push({ name: "return", frame: f.name, local: true, changed: true });
+        }
+        ret = `<div class="vrow ret"><span class="vname">return value</span>${valueHTML(f.returning, heap, { frame: true, changed: true })}</div>`;
+      }
+      return `<div class="frame${fi === lastFrame ? " active" : ""}"><div class="frame-name">${esc(f.name)}</div>${rows || ret ? rows + ret : '<div class="vrow muted">nothing to show yet</div>'}</div>`;
     }).join("");
 
     // objects
     if (!layout) computeLayout();
     const visible = Object.keys(heap).filter((id) => heap[id] && !isHidden(heap, id) && layout.pos.has(id));
     const heapEl = $("heap");
-    heapEl.innerHTML = visible.map((id) => objectHTML(id, heap[id], heap)).join("");
+    heapEl.innerHTML = visible.map((id) => objectHTML(id, heap[id], heap, diff, tags.get(id))).join("");
 
     const GAP_X = 46, GAP_Y = 26;
-    const usedRows = new Map(), usedCols = new Map();
+    const rowBox = new Map(), rowTag = new Map(), usedCols = new Map();
     const els = new Map();
     heapEl.querySelectorAll(".obj").forEach((el) => {
       const id = el.dataset.id, p = layout.pos.get(id);
+      const t = el.querySelector(".tags");
       els.set(id, el);
-      usedRows.set(p.r, Math.max(usedRows.get(p.r) || 0, el.offsetHeight));
+      rowBox.set(p.r, Math.max(rowBox.get(p.r) || 0, el.offsetHeight));
+      rowTag.set(p.r, Math.max(rowTag.get(p.r) || 0, t ? t.offsetHeight + 4 : 0));
       usedCols.set(p.c, Math.max(usedCols.get(p.c) || 0, el.offsetWidth));
     });
+    const rowH = new Map([...rowBox].map(([r, h]) => [r, h + rowTag.get(r)]));
     const offsets = (m, gap) => {
       const keys = [...m.keys()].sort((a, b) => a - b);
       const out = new Map(); let acc = 0;
       keys.forEach((k) => { out.set(k, acc); acc += m.get(k) + gap; });
       return [out, Math.max(0, acc - gap)];
     };
-    const [rowY, totalH] = offsets(usedRows, GAP_Y);
+    const [rowY, totalH] = offsets(rowH, GAP_Y);
     const [colX, totalW] = offsets(usedCols, GAP_X);
     let maxW = totalW, maxH = totalH;
     els.forEach((el, id) => {
       const p = layout.pos.get(id), m = moved.get(layout.key.get(id));
-      const x = m ? m.x : colX.get(p.c), y = m ? m.y : rowY.get(p.r);
+      const x = m ? m.x : colX.get(p.c), y = m ? m.y : rowY.get(p.r) + rowTag.get(p.r);
       el.style.left = x + "px";
       el.style.top = y + "px";
       maxW = Math.max(maxW, x + el.offsetWidth);
@@ -390,18 +607,47 @@
     const box = viz.getBoundingClientRect();
     svg.setAttribute("width", viz.scrollWidth);
     svg.setAttribute("height", viz.scrollHeight);
-    let paths = `<defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="var(--arrow)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>`;
+    const marker = (id, color) => `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>`;
+    let ghosts = "", normal = "", hot = "";
+    // Arrows leave the dot heading right. They enter a box from the left when it
+    // is to the right; a box that is above or below (and not to the right) is
+    // entered from its bottom or top edge instead, so the arrow doesn't loop.
+    const curve = (from, toEl) => {
+      const a = from.getBoundingClientRect(), b = toEl.getBoundingClientRect();
+      const sx = a.left + a.width / 2 - box.left, sy = a.top + a.height / 2 - box.top;
+      const L = b.left - box.left, T = b.top - box.top, R = b.right - box.left, B = b.bottom - box.top;
+      let d;
+      if (L >= sx + 12) {
+        const tx = L - 1, ty = T + 12, dx = Math.max(40, (tx - sx) / 2);
+        d = `M${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`;
+      } else if (B < sy - 8 || T > sy + 8) {
+        const up = B < sy;
+        const tx = Math.min(R - 14, Math.max(L + 14, (L + R) / 2)), ty = up ? B + 1 : T - 1;
+        const dy = Math.max(30, Math.abs(ty - sy) / 2);
+        d = `M${sx} ${sy} C ${sx + 40} ${sy}, ${tx} ${up ? ty + dy : ty - dy}, ${tx} ${ty}`;
+      } else {
+        const tx = L - 1, ty = T + 12;
+        d = `M${sx} ${sy} C ${sx + 60} ${sy}, ${tx - 60} ${ty}, ${tx} ${ty}`;
+      }
+      return { sx, sy, d };
+    };
+    viz.querySelectorAll("[data-was]").forEach((el) => {
+      const target = viz.querySelector(`.obj[data-id="${el.dataset.was}"]`);
+      if (!target) return;
+      const p = curve(el, target);
+      ghosts += `<path d="${p.d}" fill="none" stroke="var(--ghost)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#head-ghost)"/>`;
+    });
     viz.querySelectorAll(".ptr[data-ref]").forEach((ptr) => {
       const target = viz.querySelector(`.obj[data-id="${ptr.dataset.ref}"]`);
       if (!target) return;
-      const a = ptr.getBoundingClientRect(), b = target.getBoundingClientRect();
-      const sx = a.left + a.width / 2 - box.left, sy = a.top + a.height / 2 - box.top;
-      const tx = b.left - box.left - 1, ty = b.top - box.top + 12;
-      const dx = Math.max(40, Math.abs(tx - sx) / 2);
-      paths += `<circle cx="${sx}" cy="${sy}" r="3" fill="var(--arrow)"/>`;
-      paths += `<path d="M${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}" fill="none" stroke="var(--arrow)" stroke-width="1.5" marker-end="url(#head)"/>`;
+      const p = curve(ptr, target);
+      if (ptr.dataset.changed) {
+        hot += `<circle cx="${p.sx}" cy="${p.sy}" r="3.5" fill="var(--hot)"/><path d="${p.d}" fill="none" stroke="var(--hot)" stroke-width="2.6" marker-end="url(#head-hot)"/>`;
+      } else {
+        normal += `<circle cx="${p.sx}" cy="${p.sy}" r="3" fill="var(--arrow)"/><path d="${p.d}" fill="none" stroke="var(--arrow)" stroke-width="1.5" marker-end="url(#head)"/>`;
+      }
     });
-    svg.innerHTML = paths;
+    svg.innerHTML = `<defs>${marker("head", "var(--arrow)")}${marker("head-hot", "var(--hot)")}${marker("head-ghost", "var(--ghost)")}</defs>${ghosts}${normal}${hot}`;
   }
 
   // ---------- dragging ----------
@@ -421,7 +667,8 @@
     heapEl.addEventListener("pointermove", (e) => {
       if (!drag) return;
       const x = Math.max(0, drag.x + e.clientX - drag.px);
-      const y = Math.max(0, drag.y + e.clientY - drag.py);
+      const tagEl = drag.el.querySelector(".tags");
+      const y = Math.max(tagEl ? tagEl.offsetHeight + 4 : 0, drag.y + e.clientY - drag.py);
       drag.el.style.left = x + "px";
       drag.el.style.top = y + "px";
       moved.set(drag.key, { x, y });

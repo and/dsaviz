@@ -51,11 +51,15 @@
 
   <section class="right">
     <div class="toolbar">
-      <span class="muted hint">Edit the code and this updates. Drag any box to move it.</span>
+      <span class="seg" role="group" aria-label="How to show variables">
+        <button id="mode-labels" title="Variables appear as name tags on the box they point to">Labels</button>
+        <button id="mode-arrows" title="Every variable draws an arrow">Arrows</button>
+      </span>
       <span class="grow"></span>
       <label class="check"><input type="checkbox" id="hide-defs" checked> hide functions and classes</label>
       <button id="reset-layout" title="Put dragged boxes back where they started" disabled>Reset layout</button>
     </div>
+    <div class="changes" id="changes" aria-live="polite"></div>
     <div class="viz-col">
       <div class="placeholder" id="placeholder">Loading Python…<br><span class="muted">First visit downloads about 10 MB; after that it's cached.</span></div>
       <div class="viz" id="viz">
@@ -67,7 +71,7 @@
   </section>
 </main>
 
-<footer class="foot muted">Python runs in your browser via <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>. Inspired by <a href="https://pythontutor.com" target="_blank" rel="noopener">Python Tutor</a>. Step with <kbd>←</kbd> <kbd>→</kbd> when you're not typing.</footer>
+<footer class="foot muted">Edit the code and the drawing updates. Drag any box to move it. Coral marks what changed in the last step; a dashed line shows where a pointer used to go.<br>Python runs in your browser via <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>. Inspired by <a href="https://pythontutor.com" target="_blank" rel="noopener">Python Tutor</a>. Step with <kbd>←</kbd> <kbd>→</kbd> when you're not typing.</footer>
 
 <script src="examples.js"></script>
 <script src="app.js"></script>
