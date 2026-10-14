@@ -14,9 +14,11 @@ It's like [Python Tutor](https://pythontutor.com), but everything runs **in your
 
 ## Using it
 
-1. Pick an example or paste your own code.
-2. Click **Visualize** (or press Ctrl/⌘ + Enter).
-3. Step with **Next / Prev**, the slider, or the ← → keys.
+Everything is on one page: code on the left, the drawing on the right.
+
+1. Pick an example or type your own code. The drawing updates a moment after you stop typing (Ctrl/⌘ + Enter re-runs straight away). If you're mid-edit and the code doesn't parse, the last working drawing stays up and the bad line is marked.
+2. Step with **Next / Prev**, the slider, or the ← → keys. The editor highlights the line that just ran and the one that runs next.
+3. Drag any box to rearrange the drawing. Moved boxes stay put while you step and while you edit; **Reset layout** puts them back.
 4. **Copy link** puts your code in the URL, so you can share or bookmark it. Nothing is stored anywhere.
 
 The first visit downloads Python (about 10 MB). After that, the browser caches it.

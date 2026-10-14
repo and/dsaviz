@@ -4,50 +4,92 @@
   const PYODIDE_VERSION = "314.0.7";
   const params = new URLSearchParams(location.search);
   const INDEX_URL = params.get("pyodide") || `https://cdn.jsdelivr.net/npm/pyodide@${PYODIDE_VERSION}/`;
+  const RERUN_DELAY_MS = 600;   // wait this long after typing stops before re-running
 
   const $ = (id) => document.getElementById(id);
-  const editor = $("editor"), gutter = $("gutter"), runBtn = $("run"), statusEl = $("status");
-  const examplesSel = $("examples"), hideDefsBox = $("hide-defs");
+  const editor = $("editor"), examplesSel = $("examples"), hideDefsBox = $("hide-defs");
 
   let traceFn = null;
-  let result = null;
+  let result = null;           // last successful trace
   let stepIndex = 0;
-  let layout = null;      // { pos: Map(id -> {r, c}) } for the current run
-  const moved = new Map(); // id -> {x, y}: boxes the user has dragged, kept for the whole run
+  let layout = null;           // { pos: Map(id -> {r, c}), key: Map(id -> stable key) }
+  let codeError = null;        // syntax error in the code as typed now (old drawing stays up)
+  let ranCode = null;          // the code `result` came from
+  // Boxes the user dragged, keyed by creation order ("3rd object made"), not by
+  // memory id, so a moved box stays put when the code is edited and re-run.
+  const moved = new Map();     // key -> {x, y}
 
   // ---------- helpers ----------
   const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
   const b64encode = (s) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   const b64decode = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0)));
 
-  function setStatus(text, isError = false) {
-    statusEl.textContent = text;
-    statusEl.style.color = isError ? "var(--err)" : "";
+  // ---------- editor ----------
+  const LINE_H = 21, PAD = 12;   // must match --lh / --pad in style.css
+
+  function lineCount() { return editor.value.split("\n").length; }
+
+  function paintEditor() {
+    const n = lineCount();
+    const step = result && !$("viz").hidden ? result.steps[stepIndex] : null;
+    const prev = step && stepIndex > 0 ? result.steps[stepIndex - 1] : null;
+    const isLast = result && stepIndex === result.steps.length - 1;
+    const errLine = codeError ? codeError.line : (isLast && result.error ? result.error.line : null);
+    const cls = (i) => {
+      if (i === errLine) return "error";
+      if (step && i === step.line) return "next";
+      if (prev && i === prev.line) return "prev";
+      return "";
+    };
+    let g = "", h = "";
+    for (let i = 1; i <= n; i++) {
+      const c = cls(i);
+      const mark = c === "next" || c === "prev" ? "➜" : c === "error" ? "✕" : "";
+      g += `<div class="gl ${c}"><span class="mark">${mark}</span><span class="num">${i}</span></div>`;
+      if (c) h += `<div class="hl-line ${c}" style="top:${PAD + (i - 1) * LINE_H}px"></div>`;
+    }
+    $("gutter").innerHTML = `<div class="gutter-inner">${g}</div>`;
+    $("hl").innerHTML = h;
+    syncScroll();
   }
 
-  // ---------- editor ----------
-  function syncGutter() {
-    const n = editor.value.split("\n").length;
-    let s = "";
-    for (let i = 1; i <= n; i++) s += i + "\n";
-    gutter.textContent = s;
-    gutter.scrollTop = editor.scrollTop;
+  function syncScroll() {
+    const gi = $("gutter").firstElementChild;
+    if (gi) gi.style.transform = `translateY(${-editor.scrollTop}px)`;
+    $("hl").style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`;
   }
-  editor.addEventListener("input", syncGutter);
-  editor.addEventListener("scroll", () => { gutter.scrollTop = editor.scrollTop; });
+  editor.addEventListener("scroll", syncScroll);
+
+  function scrollLineIntoView(line) {
+    const top = PAD + (line - 1) * LINE_H;
+    const view = editor.clientHeight;
+    if (top < editor.scrollTop + LINE_H || top > editor.scrollTop + view - 3 * LINE_H) {
+      editor.scrollTop = Math.max(0, top - view / 3);
+    }
+  }
+
+  let rerunTimer = null;
+  editor.addEventListener("input", () => {
+    examplesSel.value = "custom";
+    paintEditor();
+    clearTimeout(rerunTimer);
+    rerunTimer = setTimeout(() => run({ keepStep: true }), RERUN_DELAY_MS);
+  });
   editor.addEventListener("keydown", (e) => {
     if (e.key === "Tab") {
       e.preventDefault();
       const { selectionStart: a, selectionEnd: b, value } = editor;
       editor.value = value.slice(0, a) + "  " + value.slice(b);
       editor.selectionStart = editor.selectionEnd = a + 2;
-      syncGutter();
+      editor.dispatchEvent(new Event("input"));
     } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      run();
+      clearTimeout(rerunTimer);
+      run({ keepStep: true });
     }
   });
 
+  // ---------- examples & share links ----------
   const examples = window.DSAVIZ_EXAMPLES || [];
   examples.forEach((ex, i) => {
     const o = document.createElement("option");
@@ -60,34 +102,30 @@
   examplesSel.addEventListener("change", () => {
     if (examplesSel.value === "custom") return;
     editor.value = examples[Number(examplesSel.value)].code;
-    syncGutter();
+    editor.scrollTop = 0;
+    moved.clear();
+    run({ keepStep: false });
   });
-  editor.addEventListener("input", () => { examplesSel.value = "custom"; });
 
-  // ---------- share links ----------
-  function shareLink() {
+  $("share").addEventListener("click", (e) => {
     const url = `${location.origin}${location.pathname}#code=${b64encode(editor.value)}`;
     history.replaceState(null, "", url);
     if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
-    return url;
-  }
-  function flash(btn, text) {
-    const old = btn.textContent; btn.textContent = text;
+    const btn = e.target, old = btn.textContent;
+    btn.textContent = "Link copied";
     setTimeout(() => { btn.textContent = old; }, 1500);
-  }
-  $("share").addEventListener("click", (e) => { shareLink(); flash(e.target, "Link copied"); });
-  $("share2").addEventListener("click", (e) => { shareLink(); flash(e.target, "Link copied"); });
+  });
 
-  let autoRun = false;
   const hashMatch = location.hash.match(/code=([^&]+)/);
   if (hashMatch) {
-    try { editor.value = b64decode(hashMatch[1]); examplesSel.value = "custom"; autoRun = true; }
-    catch (_) { editor.value = examples[0].code; }
+    try { editor.value = b64decode(hashMatch[1]); examplesSel.value = "custom"; }
+    catch (_) { editor.value = examples[0].code; examplesSel.value = "0"; }
   } else if (examples.length) {
     editor.value = examples[0].code;
     examplesSel.value = "0";
   }
-  syncGutter();
+  $("viz").hidden = true;
+  paintEditor();
 
   // ---------- Pyodide ----------
   function loadScript(src) {
@@ -100,7 +138,6 @@
 
   async function boot() {
     try {
-      setStatus("Downloading Python (first visit only)…");
       await loadScript(INDEX_URL + "pyodide.js");
       const pyodide = await window.loadPyodide({ indexURL: INDEX_URL });
       const src = await (await fetch("tracer.py")).text();
@@ -108,62 +145,60 @@
       ns.set("__name__", "dsaviz_tracer");
       pyodide.runPython(src, { globals: ns });
       traceFn = ns.get("trace");
-      runBtn.disabled = false;
-      runBtn.textContent = "Visualize ▸";
-      setStatus("Ready. Ctrl/⌘ + Enter also runs.");
-      if (autoRun) run();
+      run({ keepStep: false });
     } catch (err) {
-      runBtn.textContent = "Python failed to load";
-      setStatus(String(err.message || err), true);
+      $("placeholder").innerHTML = `Python failed to load.<br><span class="muted">${esc(err.message || err)}</span>`;
     }
   }
 
   // ---------- run ----------
-  function run() {
-    if (!traceFn) return;
-    setStatus("Running…");
-    runBtn.disabled = true;
-    setTimeout(() => {
-      try {
-        result = JSON.parse(traceFn(editor.value));
-      } catch (err) {
-        setStatus("Tracer error: " + err.message, true);
-        runBtn.disabled = false;
-        return;
-      }
-      runBtn.disabled = false;
-      if (!result.steps.length) {
-        if (result.error) {
-          const where = result.error.line ? ` (line ${result.error.line})` : "";
-          setStatus(`${result.error.type}: ${result.error.message}${where}`, true);
-        } else {
-          setStatus("Nothing to show. Add some code that runs.");
-        }
-        return;
-      }
-      setStatus("");
-      layout = null;
-      moved.clear();
-      stepIndex = 0;
-      $("edit-view").hidden = true;
-      $("viz-view").hidden = false;
-      renderCode();
-      $("slider").max = String(result.steps.length - 1);
-      render();
-    }, 20);
+  function showBanner(kind, text) {
+    const b = $("banner");
+    if (!kind) { b.hidden = true; return; }
+    b.hidden = false; b.className = "banner " + kind; b.textContent = text;
   }
-  runBtn.addEventListener("click", run);
-  $("back-to-edit").addEventListener("click", () => {
-    $("viz-view").hidden = true;
-    $("edit-view").hidden = false;
-    editor.focus();
-  });
+  const errText = (e) => `${e.type}: ${e.message}${e.line ? ` (line ${e.line})` : ""}`;
+
+  function run({ keepStep }) {
+    if (!traceFn) return;
+    const code = editor.value;
+    if (code === ranCode && result) return;
+    let r;
+    try {
+      r = JSON.parse(traceFn(code));
+    } catch (err) {
+      showBanner("error", "Tracer error: " + err.message);
+      return;
+    }
+    if (!r.steps.length) {
+      // Usually a syntax error while typing: keep the last drawing, flag the line.
+      codeError = r.error;
+      if (!result) {
+        $("placeholder").hidden = false;
+        $("placeholder").innerHTML = r.error ? esc(errText(r.error)) : "Write some code and it will be drawn here.";
+      }
+      showBanner(r.error ? "error" : null, r.error ? errText(r.error) + (result ? ". Showing the last version that ran." : "") : "");
+      paintEditor();
+      return;
+    }
+    codeError = null;
+    const sameShape = result && keepStep;
+    const oldIndex = stepIndex;
+    result = r;
+    ranCode = code;
+    layout = null;
+    stepIndex = sameShape ? Math.min(oldIndex, r.steps.length - 1) : 0;
+    $("slider").max = String(r.steps.length - 1);
+    $("placeholder").hidden = true;
+    $("viz").hidden = false;
+    render({ scroll: !keepStep });
+  }
 
   // ---------- stepping ----------
   function go(i) {
     if (!result) return;
     stepIndex = Math.max(0, Math.min(result.steps.length - 1, i));
-    render();
+    render({ scroll: true });
   }
   $("first").addEventListener("click", () => go(0));
   $("prev").addEventListener("click", () => go(stepIndex - 1));
@@ -171,45 +206,12 @@
   $("last").addEventListener("click", () => go(Infinity));
   $("slider").addEventListener("input", (e) => go(Number(e.target.value)));
   document.addEventListener("keydown", (e) => {
-    if ($("viz-view").hidden || e.target === editor) return;
+    if (e.target === editor || e.target.tagName === "SELECT") return;
     if (e.key === "ArrowRight") { e.preventDefault(); go(stepIndex + 1); }
     if (e.key === "ArrowLeft") { e.preventDefault(); go(stepIndex - 1); }
   });
-  hideDefsBox.addEventListener("change", () => { if (result) { layout = null; render(); } });
-  window.addEventListener("resize", () => { if (result && !$("viz-view").hidden) drawArrows(); });
-
-  // ---------- code panel ----------
-  function renderCode() {
-    const lines = editor.value.split("\n");
-    $("code-view").innerHTML = lines.map((ln, i) =>
-      `<div class="code-line" data-line="${i + 1}"><span class="mark"></span><span class="num">${i + 1}</span><span class="src">${esc(ln) || " "}</span></div>`
-    ).join("");
-  }
-
-  function markCode(step, prevStep, isLast) {
-    document.querySelectorAll(".code-line").forEach((el) => {
-      el.classList.remove("prev", "next", "error");
-      el.querySelector(".mark").textContent = "";
-    });
-    const mark = (line, cls) => {
-      const el = document.querySelector(`.code-line[data-line="${line}"]`);
-      if (!el) return null;
-      el.classList.add(cls);
-      el.querySelector(".mark").textContent = "➜";
-      return el;
-    };
-    if (prevStep) mark(prevStep.line, "prev");
-    const nextEl = mark(step.line, "next");
-    if (isLast && result.error && result.error.line) {
-      const el = document.querySelector(`.code-line[data-line="${result.error.line}"]`);
-      if (el) el.classList.add("error");
-    }
-    if (nextEl) {
-      const view = $("code-view");
-      const top = nextEl.offsetTop - view.offsetTop;
-      if (top < view.scrollTop || top > view.scrollTop + view.clientHeight - 30) view.scrollTop = top - view.clientHeight / 3;
-    }
-  }
+  hideDefsBox.addEventListener("change", () => { if (result) { layout = null; render({}); } });
+  window.addEventListener("resize", () => { if (result) drawArrows(); });
 
   // ---------- values ----------
   function isHidden(heap, id) {
@@ -313,36 +315,33 @@
     const start = (id) => { if (!pos.has(id) && !hidden(id)) { place(id, rows, 0); visit(id); } };
     order.filter((id) => !parent.has(id)).forEach(start);
     order.forEach(start);   // anything left over sits on a cycle
-    layout = { pos };
+    const key = new Map(order.map((id, i) => [id, "o" + i]));
+    layout = { pos, key };
   }
 
   // ---------- render ----------
-  function render() {
+  function render({ scroll }) {
     const step = result.steps[stepIndex];
-    const prevStep = stepIndex > 0 ? result.steps[stepIndex - 1] : null;
     const isLast = stepIndex === result.steps.length - 1;
     const heap = step.heap;
 
-    markCode(step, prevStep, isLast);
+    paintEditor();
+    if (scroll) scrollLineIntoView(step.line);
     $("slider").value = String(stepIndex);
-    $("step-label").textContent = `Step ${stepIndex + 1} of ${result.steps.length}${isLast ? (result.error ? " · stopped with an error" : result.truncated ? "" : " · finished") : ""}`;
+    $("step-label").textContent = `Step ${stepIndex + 1} of ${result.steps.length}${isLast ? (result.error ? " · error" : result.truncated ? "" : " · finished") : ""}`;
     $("first").disabled = $("prev").disabled = stepIndex === 0;
     $("next").disabled = $("last").disabled = isLast;
     $("stdout").textContent = step.stdout;
 
-    const banner = $("banner");
-    banner.hidden = true;
-    if (isLast && result.error) {
-      banner.hidden = false; banner.className = "banner error";
-      banner.textContent = `${result.error.type}: ${result.error.message}${result.error.line ? ` (line ${result.error.line})` : ""}`;
-    } else if (isLast && result.truncated) {
-      banner.hidden = false; banner.className = "banner warn";
-      banner.textContent = `Stopped after ${result.steps.length} steps. Is there an infinite loop?`;
-    }
+    if (codeError) showBanner("error", errText(codeError) + ". Showing the last version that ran.");
+    else if (isLast && result.error) showBanner("error", errText(result.error));
+    else if (isLast && result.truncated) showBanner("warn", `Stopped after ${result.steps.length} steps. Is there an infinite loop?`);
+    else showBanner(null);
 
     // frames
     $("frames").innerHTML = step.frames.map((f, i) => {
-      const rows = f.vars.filter(([, v]) => !(v[0] === "ref" && isHidden(heap, v[1]))).map(([name, v]) => `<div class="vrow"><span class="vname">${esc(name)}</span>${valueHTML(v, heap)}</div>`).join("");
+      const rows = f.vars.filter(([, v]) => !(v[0] === "ref" && isHidden(heap, v[1])))
+        .map(([name, v]) => `<div class="vrow"><span class="vname">${esc(name)}</span>${valueHTML(v, heap)}</div>`).join("");
       const ret = f.returning ? `<div class="vrow ret"><span class="vname">return value</span>${valueHTML(f.returning, heap)}</div>` : "";
       return `<div class="frame${i === step.frames.length - 1 ? " active" : ""}"><div class="frame-name">${esc(f.name)}</div>${rows || ret ? rows + ret : '<div class="vrow muted">nothing to show yet</div>'}</div>`;
     }).join("");
@@ -372,7 +371,7 @@
     const [colX, totalW] = offsets(usedCols, GAP_X);
     let maxW = totalW, maxH = totalH;
     els.forEach((el, id) => {
-      const p = layout.pos.get(id), m = moved.get(id);
+      const p = layout.pos.get(id), m = moved.get(layout.key.get(id));
       const x = m ? m.x : colX.get(p.c), y = m ? m.y : rowY.get(p.r);
       el.style.left = x + "px";
       el.style.top = y + "px";
@@ -407,15 +406,15 @@
 
   // ---------- dragging ----------
   // Boxes can be dragged anywhere in the drawing area. A dragged box keeps its
-  // spot for every step of this run; "Reset layout" puts everything back.
+  // spot for every step, and across edits; "Reset layout" puts everything back.
   (function enableDragging() {
     const heapEl = $("heap");
     let drag = null;
     heapEl.addEventListener("pointerdown", (e) => {
       const el = e.target.closest(".obj");
-      if (!el || e.button !== 0) return;
+      if (!el || e.button !== 0 || !layout) return;
       e.preventDefault();
-      drag = { el, id: el.dataset.id, px: e.clientX, py: e.clientY, x: el.offsetLeft, y: el.offsetTop };
+      drag = { el, key: layout.key.get(el.dataset.id), px: e.clientX, py: e.clientY, x: el.offsetLeft, y: el.offsetTop };
       el.classList.add("dragging");
       el.setPointerCapture(e.pointerId);
     });
@@ -425,7 +424,7 @@
       const y = Math.max(0, drag.y + e.clientY - drag.py);
       drag.el.style.left = x + "px";
       drag.el.style.top = y + "px";
-      moved.set(drag.id, { x, y });
+      moved.set(drag.key, { x, y });
       heapEl.style.width = Math.max(heapEl.offsetWidth, x + drag.el.offsetWidth) + "px";
       heapEl.style.height = Math.max(heapEl.offsetHeight, y + drag.el.offsetHeight) + "px";
       $("reset-layout").disabled = false;
@@ -438,7 +437,7 @@
     };
     heapEl.addEventListener("pointerup", end);
     heapEl.addEventListener("pointercancel", end);
-    $("reset-layout").addEventListener("click", () => { moved.clear(); if (result) render(); });
+    $("reset-layout").addEventListener("click", () => { moved.clear(); if (result) render({}); });
   })();
 
   boot();

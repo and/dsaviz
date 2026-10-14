@@ -13,62 +13,61 @@
   <a class="gh" href="https://github.com/and/dsaviz" target="_blank" rel="noopener">GitHub</a>
 </header>
 
-<main>
-  <section id="edit-view">
+<main class="workspace">
+  <section class="left">
     <div class="toolbar">
-      <label for="examples">Example</label>
+      <label for="examples" class="muted">Example</label>
       <select id="examples"></select>
-      <span class="grow"></span>
-      <label class="check"><input type="checkbox" id="hide-defs" checked> hide functions and classes</label>
-    </div>
-    <div class="editor-wrap">
-      <pre class="gutter" id="gutter" aria-hidden="true"></pre>
-      <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Python code"></textarea>
-    </div>
-    <div class="toolbar">
-      <button id="run" class="primary" disabled>Loading Python…</button>
-      <span id="status" class="muted"></span>
       <span class="grow"></span>
       <button id="share" title="Copy a link that opens this code">Copy link</button>
     </div>
+
+    <div class="editor-wrap">
+      <div class="gutter" id="gutter" aria-hidden="true"></div>
+      <div class="code-area">
+        <div class="hl" aria-hidden="true"><div class="hl-inner" id="hl"></div></div>
+        <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Python code. Edit it and the drawing updates."></textarea>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="stepper">
+        <button id="first" aria-label="First step">« First</button>
+        <button id="prev" aria-label="Previous step">‹ Prev</button>
+        <button id="next" aria-label="Next step">Next ›</button>
+        <button id="last" aria-label="Last step">Last »</button>
+      </div>
+      <input type="range" id="slider" min="0" max="0" value="0" aria-label="Step">
+      <div class="step-row">
+        <span class="legend"><span class="prev-mark">➜</span> just ran <span class="next-mark">➜</span> runs next</span>
+        <span id="step-label" class="step-label"></span>
+      </div>
+      <div class="banner" id="banner" hidden></div>
+    </div>
+
+    <div class="out-title muted">Print output</div>
+    <pre class="stdout" id="stdout"></pre>
   </section>
 
-  <section id="viz-view" hidden>
-    <div class="viz-grid">
-      <div class="code-col">
-        <div class="toolbar">
-          <button id="back-to-edit">← Edit code</button>
-          <button id="reset-layout" title="Put dragged boxes back where they started" disabled>Reset layout</button>
-          <span class="grow"></span>
-          <button id="share2" title="Copy a link that opens this code">Copy link</button>
-        </div>
-        <div class="code-view" id="code-view"></div>
-        <div class="legend"><span class="arrow prev">➜</span> line just run <span class="arrow next">➜</span> next line to run</div>
-        <div class="stepper">
-          <button id="first" aria-label="First step">« First</button>
-          <button id="prev" aria-label="Previous step">‹ Prev</button>
-          <button id="next" aria-label="Next step">Next ›</button>
-          <button id="last" aria-label="Last step">Last »</button>
-        </div>
-        <input type="range" id="slider" min="0" max="0" value="0" aria-label="Step">
-        <div class="step-label" id="step-label"></div>
-        <div class="banner" id="banner" hidden></div>
-        <div class="out-title">Print output</div>
-        <pre class="stdout" id="stdout"></pre>
-      </div>
-      <div class="viz-col">
-        <div class="viz-hint muted">Drag any box to move it.</div>
-        <div class="viz" id="viz">
-          <svg class="arrows" id="arrows"></svg>
-          <div class="frames" id="frames"></div>
-          <div class="heap" id="heap"></div>
-        </div>
+  <section class="right">
+    <div class="toolbar">
+      <span class="muted hint">Edit the code and this updates. Drag any box to move it.</span>
+      <span class="grow"></span>
+      <label class="check"><input type="checkbox" id="hide-defs" checked> hide functions and classes</label>
+      <button id="reset-layout" title="Put dragged boxes back where they started" disabled>Reset layout</button>
+    </div>
+    <div class="viz-col">
+      <div class="placeholder" id="placeholder">Loading Python…<br><span class="muted">First visit downloads about 10 MB; after that it's cached.</span></div>
+      <div class="viz" id="viz">
+        <svg class="arrows" id="arrows"></svg>
+        <div class="frames" id="frames"></div>
+        <div class="heap" id="heap"></div>
       </div>
     </div>
   </section>
 </main>
 
-<footer class="foot muted">Python runs in your browser via <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>. Inspired by <a href="https://pythontutor.com" target="_blank" rel="noopener">Python Tutor</a>. First load downloads about 10&nbsp;MB, then it's cached. <kbd>←</kbd> <kbd>→</kbd> step through.</footer>
+<footer class="foot muted">Python runs in your browser via <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>. Inspired by <a href="https://pythontutor.com" target="_blank" rel="noopener">Python Tutor</a>. Step with <kbd>←</kbd> <kbd>→</kbd> when you're not typing.</footer>
 
 <script src="examples.js"></script>
 <script src="app.js"></script>
