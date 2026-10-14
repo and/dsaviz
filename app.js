@@ -47,7 +47,7 @@
     }
   });
 
-  const examples = window.PYVIZ_EXAMPLES || [];
+  const examples = window.DSAVIZ_EXAMPLES || [];
   examples.forEach((ex, i) => {
     const o = document.createElement("option");
     o.value = String(i); o.textContent = ex.name;
@@ -104,7 +104,7 @@
       const pyodide = await window.loadPyodide({ indexURL: INDEX_URL });
       const src = await (await fetch("tracer.py")).text();
       const ns = pyodide.globals.get("dict")();
-      ns.set("__name__", "pyviz_tracer");
+      ns.set("__name__", "dsaviz_tracer");
       pyodide.runPython(src, { globals: ns });
       traceFn = ns.get("trace");
       runBtn.disabled = false;

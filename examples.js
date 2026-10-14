@@ -1,4 +1,4 @@
-window.PYVIZ_EXAMPLES = [
+window.DSAVIZ_EXAMPLES = [
   {
     name: "Linked list: zipper two lists",
     code: `class Node:

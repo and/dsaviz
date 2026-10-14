@@ -1,4 +1,4 @@
-"""Execution tracer for pyviz.
+"""Python execution tracer for dsaviz.
 
 Runs a user's program under sys.settrace and records a snapshot of the
 call stack and every reachable object at each line. The result is a plain
@@ -13,7 +13,7 @@ import json
 import sys
 import types
 
-USER_FILE = "<pyviz>"
+USER_FILE = "<dsaviz>"
 MAX_STEPS = 1000
 MAX_ITEMS = 50       # cap for long lists / dicts shown in one box
 MAX_REPR = 60

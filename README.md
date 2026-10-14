@@ -1,8 +1,8 @@
-# pyviz
+# dsaviz
 
-**See your Python run, line by line.** Step through a program and watch variables, objects and pointers change, drawn as boxes and arrows.
+**See your code run, line by line.** Python today; JavaScript is planned. Step through a program and watch variables, objects and pointers change, drawn as boxes and arrows.
 
-**Live:** https://and.github.io/pyviz/
+**Live:** https://and.github.io/dsaviz/
 
 It's like [Python Tutor](https://pythontutor.com), but everything runs **in your browser**. Python is executed by [Pyodide](https://pyodide.org) (CPython compiled to WebAssembly), so there's no backend to host, nothing to keep alive, and your code never leaves your machine. The site is just static files on GitHub Pages.
 
