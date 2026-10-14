@@ -805,7 +805,9 @@
     const box = viz.getBoundingClientRect();
     svg.setAttribute("width", viz.scrollWidth);
     svg.setAttribute("height", viz.scrollHeight);
-    const marker = (id, color) => `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>`;
+    // A solid triangle, sized in screen pixels (not scaled by line thickness), so a
+    // thick highlighted arrow gets the same tidy head as a thin one.
+    const marker = (id, color) => `<marker id="${id}" viewBox="0 0 10 10" refX="9.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M0.5 1 L9.5 5 L0.5 9 Z" fill="${color}"/></marker>`;
     let ghosts = "", normal = "", colored = "", hot = "";
     const customMarkers = new Map();
     // Arrows always leave the dot heading right.
@@ -820,9 +822,12 @@
       const a = from.getBoundingClientRect(), b = toEl.getBoundingClientRect();
       const sx = a.left + a.width / 2 - box.left, sy = a.top + a.height / 2 - box.top;
       const L = b.left - box.left, T = b.top - box.top, R = b.right - box.left, B = b.bottom - box.top;
+      // Every arrow ends with a short straight run into the box, so the arrowhead
+      // points the same way as the line it sits on, however sharp the curve.
+      const HEAD = 9;
       const leftEntry = () => {
         const tx = L - 1, ty = T + 12, dx = Math.max(40, Math.abs(tx - sx) / 2);
-        return `M${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`;
+        return `M${sx} ${sy} C ${sx + dx} ${sy}, ${tx - HEAD - dx} ${ty}, ${tx - HEAD} ${ty} L ${tx} ${ty}`;
       };
       let d;
       if (arrowStyle === "classic" || L >= sx + 12) {
@@ -831,12 +836,13 @@
         if (R + 16 < sx) {
           const tx = R + 1, ty = Math.min(B - 12, Math.max(T + 12, sy));
           const out = Math.max(36, Math.min(80, Math.abs(ty - sy) / 2));
-          d = `M${sx} ${sy} C ${sx + out} ${sy}, ${tx + out} ${ty}, ${tx} ${ty}`;
+          d = `M${sx} ${sy} C ${sx + out} ${sy}, ${tx + HEAD + out} ${ty}, ${tx + HEAD} ${ty} L ${tx} ${ty}`;
         } else {
           const up = B < sy;
           const tx = Math.min(R - 14, Math.max(L + 14, (L + R) / 2)), ty = up ? B + 1 : T - 1;
           const dy = Math.max(30, Math.abs(ty - sy) / 2);
-          d = `M${sx} ${sy} C ${sx + 40} ${sy}, ${tx} ${up ? ty + dy : ty - dy}, ${tx} ${ty}`;
+          const ey = up ? ty + HEAD : ty - HEAD;
+          d = `M${sx} ${sy} C ${sx + 40} ${sy}, ${tx} ${up ? ey + dy : ey - dy}, ${tx} ${ey} L ${tx} ${ty}`;
         }
       } else {
         // Arc over the row, clearing any name tags, and land near the box's
@@ -845,7 +851,7 @@
         const tagH = tags ? tags.offsetHeight + 4 : 0;
         const tx = Math.max(L + 14, R - 16), ty = T - 1;
         const lift = Math.max(2, Math.min(T - tagH, sy) - 34);
-        d = `M${sx} ${sy} C ${sx + 50} ${lift}, ${tx} ${lift}, ${tx} ${ty}`;
+        d = `M${sx} ${sy} C ${sx + 50} ${lift}, ${tx} ${lift}, ${tx} ${ty - HEAD} L ${tx} ${ty}`;
       }
       return { sx, sy, d };
     };
