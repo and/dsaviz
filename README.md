@@ -1,6 +1,6 @@
 # dsaviz
 
-**See your code run, line by line.** Python today; JavaScript is planned. Step through a program and watch variables, objects and pointers change, drawn as boxes and arrows.
+**See your code run, line by line.** Supports Python today. Step through a program and watch variables, objects and pointers change, drawn as boxes and arrows.
 
 **Live:** https://and.github.io/dsaviz/
 
