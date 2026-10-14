@@ -107,8 +107,13 @@ button:disabled { opacity: .5; cursor: default; }
 
 .obj { position: absolute; background: var(--obj-bg); border: 1px solid var(--obj-border); border-radius: 6px;
   font-family: var(--mono); font-size: 13px; transition: left .15s, top .15s; }
-.obj { cursor: grab; touch-action: none; user-select: none; }
+.obj { cursor: move; cursor: grab; touch-action: none; user-select: none; }
+.obj:hover { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.obj-head { display: flex; justify-content: space-between; gap: 10px; }
+.obj-head::after { content: "⠿"; color: var(--muted); opacity: .45; font-size: 12px; line-height: 1; }
+.obj:hover .obj-head::after { opacity: 1; color: var(--accent); }
 .obj.dragging { cursor: grabbing; transition: none; z-index: 5; outline: 2px solid var(--accent); outline-offset: 1px; }
+.obj.dragging * { cursor: grabbing; }
 
 .obj-head { font-size: 11px; color: var(--obj-head); padding: 3px 8px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; letter-spacing: .2px; }
 .obj table { border-collapse: collapse; }
