@@ -382,7 +382,7 @@
     $("slider").max = String(r.steps.length - 1);
     $("placeholder").hidden = true;
     $("viz").hidden = false;
-    render({ scroll: !keepStep || stepIndex > 0 });
+    render({ scroll: !keepStep });
     reserveCaptionHeight();
   }
 
