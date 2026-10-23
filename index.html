@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dsaviz: see your code run</title>
 <meta name="description" content="Step through Python code and watch variables, objects and pointers change. Runs entirely in your browser.">
-<link rel="stylesheet" href="style.css?v=26">
+<link rel="stylesheet" href="style.css?v=27">
 </head>
 <body>
 <header class="top">
@@ -16,8 +16,11 @@
 <main class="workspace">
   <section class="left">
     <div class="toolbar">
-      <label for="examples" class="muted">Example</label>
+      <label for="examples" class="muted">Code</label>
       <select id="examples"></select>
+      <button id="new-code" class="snippet-btn" title="Create a new custom code snippet">+ New</button>
+      <button id="rename-code" class="snippet-btn" title="Rename this custom snippet" hidden>✎ Rename</button>
+      <button id="delete-code" class="snippet-btn" title="Delete this custom snippet" hidden>🗑 Delete</button>
       <span class="grow"></span>
       <button id="share" title="Copy a link that opens this code">Copy link</button>
     </div>
@@ -96,8 +99,8 @@
 <div class="toast" id="toast" role="status" hidden><span class="toast-text"></span><button class="toast-close mini" aria-label="Dismiss">×</button></div>
 <div class="color-pop" id="color-pop" role="dialog" aria-label="Variable colours" hidden></div>
 
-<script src="examples.js?v=26"></script>
-<script src="app.js?v=26"></script>
+<script src="examples.js?v=27"></script>
+<script src="app.js?v=27"></script>
 <!-- Cloudflare Web Analytics: cookieless page views, same site as and.github.io -->
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "4f5287a7748d4f9abe3a1e759582e6b8"}'></script>
 </body>

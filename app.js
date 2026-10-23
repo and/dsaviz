@@ -125,9 +125,35 @@
   }
 
   let rerunTimer = null;
+  let saveSnippetTimer = null;
   editor.addEventListener("input", () => {
-    examplesSel.value = "custom";
-    saveYourCode(editor.value);
+    if (/(^#|&)(z|code)=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
+
+    if (!examplesSel.value.startsWith("custom:")) {
+      const exIdx = Number(examplesSel.value);
+      const exName = examples[exIdx] ? examples[exIdx].name : "Custom code";
+      const newId = "c_" + Date.now();
+      const newSnippet = {
+        id: newId,
+        name: exName + " (copy)",
+        code: editor.value
+      };
+      customSnippets.push(newSnippet);
+      activeSnippetId = newId;
+      saveCustomSnippets();
+      try { localStorage.setItem(ACTIVE_SNIPPET_KEY, newId); } catch (_) {}
+      rebuildExamplesSelect();
+      examplesSel.value = "custom:" + newId;
+      updateToolbarButtons();
+    } else {
+      const s = getActiveSnippet();
+      if (s) {
+        s.code = editor.value;
+        clearTimeout(saveSnippetTimer);
+        saveSnippetTimer = setTimeout(() => saveCustomSnippets(), 300);
+      }
+    }
+
     paintEditor();
     clearTimeout(rerunTimer);
     rerunTimer = setTimeout(() => run({ keepStep: true }), RERUN_DELAY_MS);
@@ -168,39 +194,178 @@
     }
   }
 
-  // ---------- examples & share links ----------
+  // ---------- examples & custom snippets ----------
   const examples = window.DSAVIZ_EXAMPLES || [];
-  examples.forEach((ex, i) => {
-    const o = document.createElement("option");
-    o.value = String(i); o.textContent = ex.name;
-    examplesSel.appendChild(o);
-  });
-  const custom = document.createElement("option");
-  custom.value = "custom"; custom.textContent = "Your code";
-  examplesSel.appendChild(custom);
-  // "Your code" keeps its own copy, so trying an example and switching back
-  // brings your code back (also after a refresh).
+  const CUSTOM_SNIPPETS_KEY = "dsaviz-custom-snippets";
+  const ACTIVE_SNIPPET_KEY = "dsaviz-active-snippet";
   const YOUR_CODE_KEY = "dsaviz-your-code";
-  let yourCode = null;
-  let yourCodeTimer = null;
-  function saveYourCode(code, { persist = true } = {}) {
-    yourCode = code;
-    if (!persist) return;
-    clearTimeout(yourCodeTimer);
-    yourCodeTimer = setTimeout(() => { try { localStorage.setItem(YOUR_CODE_KEY, code); } catch (_) {} }, 300);
-  }
-  examplesSel.addEventListener("change", () => {
-    if (examplesSel.value === "custom") {
-      if (yourCode == null || yourCode === editor.value) return;
-      editor.value = yourCode;
-    } else {
-      editor.value = examples[Number(examplesSel.value)].code;
+
+  function loadCustomSnippets() {
+    let list = [];
+    try {
+      list = JSON.parse(localStorage.getItem(CUSTOM_SNIPPETS_KEY) || "[]");
+    } catch (_) {}
+    if (!Array.isArray(list) || list.length === 0) {
+      let oldCode = null;
+      try { oldCode = localStorage.getItem(YOUR_CODE_KEY); } catch (_) {}
+      list = [{
+        id: "c_1",
+        name: "Your code",
+        code: oldCode || "# Write your Python code here\n"
+      }];
+      saveCustomSnippets(list);
     }
+    return list;
+  }
+
+  function saveCustomSnippets(list = customSnippets) {
+    try {
+      localStorage.setItem(CUSTOM_SNIPPETS_KEY, JSON.stringify(list));
+      const active = list.find((s) => s.id === activeSnippetId) || list[0];
+      if (active) localStorage.setItem(YOUR_CODE_KEY, active.code);
+    } catch (_) {}
+  }
+
+  const customSnippets = loadCustomSnippets();
+  let activeSnippetId = null;
+  try { activeSnippetId = localStorage.getItem(ACTIVE_SNIPPET_KEY); } catch (_) {}
+  if (!activeSnippetId || !customSnippets.some((s) => s.id === activeSnippetId)) {
+    activeSnippetId = customSnippets[0].id;
+  }
+
+  function getActiveSnippet() {
+    return customSnippets.find((s) => s.id === activeSnippetId) || customSnippets[0];
+  }
+
+  function rebuildExamplesSelect() {
+    examplesSel.innerHTML = "";
+
+    const customGroup = document.createElement("optgroup");
+    customGroup.label = "Your code";
+    customSnippets.forEach((snippet) => {
+      const o = document.createElement("option");
+      o.value = "custom:" + snippet.id;
+      o.textContent = snippet.name;
+      customGroup.appendChild(o);
+    });
+    examplesSel.appendChild(customGroup);
+
+    const exGroup = document.createElement("optgroup");
+    exGroup.label = "Examples";
+    examples.forEach((ex, i) => {
+      const o = document.createElement("option");
+      o.value = String(i);
+      o.textContent = ex.name;
+      exGroup.appendChild(o);
+    });
+    examplesSel.appendChild(exGroup);
+
+    updateToolbarButtons();
+  }
+
+  function updateToolbarButtons() {
+    const isCustom = examplesSel.value.startsWith("custom:");
+    const renameBtn = $("rename-code");
+    const deleteBtn = $("delete-code");
+    if (renameBtn) renameBtn.hidden = !isCustom;
+    if (deleteBtn) deleteBtn.hidden = !isCustom;
+  }
+
+  examplesSel.addEventListener("change", () => {
+    if (examplesSel.value.startsWith("custom:")) {
+      const id = examplesSel.value.slice(7);
+      activeSnippetId = id;
+      try { localStorage.setItem(ACTIVE_SNIPPET_KEY, id); } catch (_) {}
+      const s = getActiveSnippet();
+      if (s) editor.value = s.code;
+    } else {
+      const idx = Number(examplesSel.value);
+      if (examples[idx]) editor.value = examples[idx].code;
+    }
+    updateToolbarButtons();
     editor.scrollTop = 0;
     moved.clear();
     useColorsFor(editor.value, { carry: false });
     run({ keepStep: false });
   });
+
+  const newCodeBtn = $("new-code");
+  if (newCodeBtn) {
+    newCodeBtn.addEventListener("click", () => {
+      const nextNum = customSnippets.length + 1;
+      const name = prompt("Name for new snippet:", `Snippet ${nextNum}`);
+      if (name === null) return;
+      const trimmed = name.trim() || `Snippet ${nextNum}`;
+      const newId = "c_" + Date.now();
+      const newSnippet = {
+        id: newId,
+        name: trimmed,
+        code: "# " + trimmed + "\n\n"
+      };
+      customSnippets.push(newSnippet);
+      activeSnippetId = newId;
+      saveCustomSnippets();
+      try { localStorage.setItem(ACTIVE_SNIPPET_KEY, newId); } catch (_) {}
+      rebuildExamplesSelect();
+      examplesSel.value = "custom:" + newId;
+      editor.value = newSnippet.code;
+      editor.scrollTop = 0;
+      editor.focus();
+      updateToolbarButtons();
+      moved.clear();
+      useColorsFor(editor.value, { carry: false });
+      run({ keepStep: false });
+    });
+  }
+
+  const renameCodeBtn = $("rename-code");
+  if (renameCodeBtn) {
+    renameCodeBtn.addEventListener("click", () => {
+      const s = getActiveSnippet();
+      if (!s) return;
+      const newName = prompt("Rename snippet:", s.name);
+      if (newName === null) return;
+      const trimmed = newName.trim();
+      if (!trimmed) return;
+      s.name = trimmed;
+      saveCustomSnippets();
+      rebuildExamplesSelect();
+      examplesSel.value = "custom:" + s.id;
+    });
+  }
+
+  const deleteCodeBtn = $("delete-code");
+  if (deleteCodeBtn) {
+    deleteCodeBtn.addEventListener("click", () => {
+      const s = getActiveSnippet();
+      if (!s) return;
+      if (!confirm(`Delete snippet "${s.name}"?`)) return;
+      const idx = customSnippets.findIndex((x) => x.id === s.id);
+      if (idx >= 0) customSnippets.splice(idx, 1);
+      if (customSnippets.length === 0) {
+        const fresh = {
+          id: "c_" + Date.now(),
+          name: "Your code",
+          code: "# Write your Python code here\n"
+        };
+        customSnippets.push(fresh);
+        activeSnippetId = fresh.id;
+      } else {
+        const nextIdx = Math.max(0, idx - 1);
+        activeSnippetId = customSnippets[nextIdx].id;
+      }
+      saveCustomSnippets();
+      try { localStorage.setItem(ACTIVE_SNIPPET_KEY, activeSnippetId); } catch (_) {}
+      rebuildExamplesSelect();
+      examplesSel.value = "custom:" + activeSnippetId;
+      editor.value = getActiveSnippet().code;
+      editor.scrollTop = 0;
+      updateToolbarButtons();
+      moved.clear();
+      useColorsFor(editor.value, { carry: false });
+      run({ keepStep: false });
+    });
+  }
 
   // ---------- share links ----------
   // The code travels inside the link, after the #, so nothing is stored on a
@@ -268,23 +433,30 @@
     btn.textContent = copied ? `Link copied (${url.length} chars)` : "Link is in the address bar";
     setTimeout(() => { btn.textContent = "Copy link"; }, 2200);
   });
-  // Once you edit, a code link in the address bar is out of date. Drop it, so a
-  // refresh brings back your latest code (saved locally) rather than the old link.
-  editor.addEventListener("input", () => {
-    if (/(^#|&)(z|code)=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
-  });
-
-  // Starting code: your last code if there is one, otherwise the first example.
+  // Starting code: your last code if there is one, otherwise the active custom snippet or first example.
   // A shared link (read below, before the first run) replaces it.
+  rebuildExamplesSelect();
   {
-    let last = null, saved = null;
-    try { last = localStorage.getItem("dsaviz-last-code"); saved = localStorage.getItem(YOUR_CODE_KEY); } catch (_) {}
-    const i = last == null ? 0 : examples.findIndex((ex) => ex.code === last);
-    // Older versions only kept the last code; if that wasn't an example, it was yours.
-    if (saved != null) yourCode = saved;
-    else if (last != null && i < 0) saveYourCode(last);
-    if (last != null && i < 0) { editor.value = last; examplesSel.value = "custom"; }
-    else if (examples.length) { editor.value = examples[Math.max(0, i)].code; examplesSel.value = String(Math.max(0, i)); }
+    let last = null;
+    try { last = localStorage.getItem("dsaviz-last-code"); } catch (_) {}
+    const exIdx = last == null ? 0 : examples.findIndex((ex) => ex.code === last);
+    const customMatch = last == null ? null : customSnippets.find((s) => s.code === last);
+
+    if (customMatch) {
+      activeSnippetId = customMatch.id;
+      editor.value = customMatch.code;
+      examplesSel.value = "custom:" + customMatch.id;
+    } else if (exIdx >= 0) {
+      editor.value = examples[exIdx].code;
+      examplesSel.value = String(exIdx);
+    } else {
+      const active = getActiveSnippet();
+      if (last != null) active.code = last;
+      editor.value = active.code;
+      examplesSel.value = "custom:" + active.id;
+      saveCustomSnippets();
+    }
+    updateToolbarButtons();
   }
   useColorsFor(editor.value, { carry: false });
   const initialCode = (async () => {
@@ -297,10 +469,28 @@
     }
     editor.value = shared.code;
     const ex = examples.findIndex((x) => x.code === shared.code);
-    examplesSel.value = ex >= 0 ? String(ex) : "custom";
-    // Someone else's code: show it under "Your code" for now, but don't
-    // overwrite your saved code unless you edit it.
-    if (ex < 0) saveYourCode(shared.code, { persist: false });
+    if (ex >= 0) {
+      examplesSel.value = String(ex);
+    } else {
+      const match = customSnippets.find((s) => s.code === shared.code);
+      if (match) {
+        activeSnippetId = match.id;
+        examplesSel.value = "custom:" + match.id;
+      } else {
+        const newId = "c_" + Date.now();
+        const newSnippet = {
+          id: newId,
+          name: "Shared code",
+          code: shared.code
+        };
+        customSnippets.push(newSnippet);
+        activeSnippetId = newId;
+        saveCustomSnippets();
+        rebuildExamplesSelect();
+        examplesSel.value = "custom:" + newId;
+      }
+    }
+    updateToolbarButtons();
     useColorsFor(editor.value, { carry: false });
     paintEditor();
   })();

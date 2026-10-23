@@ -59,6 +59,9 @@ button, select { font: inherit; font-size: 14px; padding: 6px 12px; border-radiu
   border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; }
 button:hover:not(:disabled) { background: var(--soft); }
 button:disabled { opacity: .5; cursor: default; }
+.snippet-btn { font-size: 12px; padding: 3px 8px; border-radius: 6px; }
+.snippet-btn:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+#delete-code:hover { background: var(--err-bg); color: var(--err); border-color: var(--err); }
 
 /* editor: a transparent textarea over a layer that paints the current-line highlights */
 .editor-wrap { --lh: 21px; --pad: 12px; display: flex; border: 1px solid var(--border); border-radius: 10px;
