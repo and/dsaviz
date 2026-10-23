@@ -649,7 +649,10 @@
       const name = shortName(heap, id);
       chip = `<span class="ref-chip${opts.changed ? " changed" : ""}" title="Points to ${esc(name)} (click to locate)">${esc(name)}</span>`;
     }
-    return `<span class="ptr${opts.frame ? " fptr" : ""}${opts.inCollection ? " in-col" : ""}" data-ref="${id}"${opts.changed ? ' data-changed="1"' : ""}${opts.color && opts.color.faded ? ' data-faded="1"' : ""}${line ? ` data-color="${line}"` : ""}${wasAttr}>${chip}<span class="dot"${line ? ` style="background:${line}"` : ""}></span></span>`;
+    const isStack = opts.isStack || false;
+    const isStackAttr = isStack ? ' data-is-stack="1"' : "";
+    const inColAttr = opts.inCollection ? ' data-in-col="1"' : "";
+    return `<span class="ptr${opts.frame ? " fptr" : ""}${opts.inCollection ? " in-col" : ""}${isStack ? " is-stack" : ""}" data-ref="${id}"${isStackAttr}${inColAttr}${opts.changed ? ' data-changed="1"' : ""}${opts.color && opts.color.faded ? ' data-faded="1"' : ""}${line ? ` data-color="${line}"` : ""}${wasAttr}>${chip}<span class="dot"${line ? ` style="background:${line}"` : ""}></span></span>`;
   }
 
   function childRefs(o) {
@@ -841,7 +844,7 @@
       const isVert = isVertical(id);
       headActions = `<span class="obj-actions"><button class="orient-btn" data-id="${id}" title="Switch to ${isVert ? "horizontal" : "vertical"} layout">${isVert ? "⇅ vertical" : "⇄ horizontal"}</button></span>`;
       const cells = o.items.map((v, i) => {
-        const c = cell(fieldKey(id, o, i), v, { inCollection: true });
+        const c = cell(fieldKey(id, o, i), v, { inCollection: true, isStack });
         const isTop = isStack && i === o.items.length - 1;
         const isFront = isQueue && i === 0;
         const badge = isTop ? `<span class="stack-badge top" title="Top of stack">top</span>` : (isFront ? `<span class="stack-badge front" title="Front of queue">front</span>` : "");
@@ -860,7 +863,9 @@
       head = o.cls || "object"; body = `<div class="plain">${esc(o.repr || "")}</div>`;
     }
     const isSelected = selectedNodes.has(id);
-    return `<div class="obj${isSelected ? " selected" : ""}" data-id="${id}">${tagHTML}<div class="obj-head"><span class="obj-type">${esc(head)}</span>${headActions}</div>${body}</div>`;
+    const vname = (step && varNameFor(step, id)) || "";
+    const isStackObj = o.items && /\bstack\b/i.test(vname);
+    return `<div class="obj${isSelected ? " selected" : ""}${isStackObj ? " is-stack" : ""}" data-id="${id}" data-type="${o.type}"${isStackObj ? ' data-is-stack="1"' : ""}>${tagHTML}<div class="obj-head"><span class="obj-type">${esc(head)}</span>${headActions}</div>${body}</div>`;
   }
 
   function tagStyle(t) {
@@ -1229,24 +1234,35 @@
       const arrId = "arr-" + idx;
       ptr.dataset.arrId = arrId;
       const p = curve(ptr, target);
+
+      const isStackArrow = ptr.dataset.isStack === "1" || ptr.closest(".is-stack") || ptr.classList.contains("is-stack");
+      const isColArrow = isStackArrow || ptr.dataset.inCol === "1" || ptr.closest(".in-col") || ptr.closest(".cells");
+
       if (ptr.dataset.faded || ptr.closest(".obj.faded")) {
-        dim += `<path class="arr-path" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="${ptr.dataset.color || "var(--arrow)"}" stroke-width="1.5" opacity=".2" marker-end="url(#head-dim)"/>`;
+        const dash = isColArrow ? ' stroke-dasharray="6 3.5"' : "";
+        const strokeCol = isColArrow ? "var(--stack-arrow)" : (ptr.dataset.color || "var(--arrow)");
+        const mid = isColArrow ? "head-dim-stack" : "head-dim";
+        dim += `<path class="arr-path${isColArrow ? " arr-stack" : " arr-tree"}" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="${strokeCol}" stroke-width="1.5"${dash} opacity=".25" marker-end="url(#${mid})"/>`;
         return;
       }
       const col = ptr.dataset.color;
       if (col) {
         const mid = "head-" + col.replace(/[^a-z0-9]/gi, "");
         if (!customMarkers.has(mid)) customMarkers.set(mid, marker(mid, col));
-        const w = ptr.dataset.changed ? 2.8 : 2;
-        const seg = `<circle class="arr-dot" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" cx="${p.sx}" cy="${p.sy}" r="3.5" fill="${col}"/><path class="arr-path" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="${col}" stroke-width="${w}" marker-end="url(#${mid})"/>`;
+        const w = ptr.dataset.changed ? 2.8 : (isColArrow ? 1.6 : 2);
+        const dash = isColArrow ? ' stroke-dasharray="6 3.5"' : "";
+        const seg = `<circle class="arr-dot${isColArrow ? " arr-dot-stack" : ""}" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" cx="${p.sx}" cy="${p.sy}" r="3.5" fill="${col}"/><path class="arr-path${isColArrow ? " arr-stack" : " arr-tree"}" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="${col}" stroke-width="${w}"${dash} marker-end="url(#${mid})"/>`;
         if (ptr.dataset.changed) hot += seg; else colored += seg;
       } else if (ptr.dataset.changed) {
-        hot += `<circle class="arr-dot" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" cx="${p.sx}" cy="${p.sy}" r="3.5" fill="var(--hot)"/><path class="arr-path" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="var(--hot)" stroke-width="2.6" marker-end="url(#head-hot)"/>`;
+        const dash = isColArrow ? ' stroke-dasharray="6 3.5"' : "";
+        hot += `<circle class="arr-dot${isColArrow ? " arr-dot-stack" : ""}" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" cx="${p.sx}" cy="${p.sy}" r="3.5" fill="var(--hot)"/><path class="arr-path${isColArrow ? " arr-stack" : " arr-tree"}" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="var(--hot)" stroke-width="2.6"${dash} marker-end="url(#head-hot)"/>`;
+      } else if (isColArrow) {
+        normal += `<circle class="arr-dot arr-dot-stack" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" cx="${p.sx}" cy="${p.sy}" r="3" fill="var(--stack-arrow)"/><path class="arr-path arr-stack" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="var(--stack-arrow)" stroke-width="1.6" stroke-dasharray="6 3.5" marker-end="url(#head-stack)"/>`;
       } else {
-        normal += `<circle class="arr-dot" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" cx="${p.sx}" cy="${p.sy}" r="3" fill="var(--arrow)"/><path class="arr-path" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="var(--arrow)" stroke-width="1.5" marker-end="url(#head)"/>`;
+        normal += `<circle class="arr-dot" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" cx="${p.sx}" cy="${p.sy}" r="3" fill="var(--arrow)"/><path class="arr-path arr-tree" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="var(--arrow)" stroke-width="2" marker-end="url(#head)"/>`;
       }
     });
-    svg.innerHTML = `<defs>${marker("head", "var(--arrow)")}${marker("head-hot", "var(--hot)")}${marker("head-hover", "var(--hot)")}${marker("head-ghost", "var(--ghost)")}${[...customMarkers.values()].join("")}${marker("head-dim", "var(--ghost)")}</defs>${dim}${ghosts}${normal}${colored}${hot}`;
+    svg.innerHTML = `<defs>${marker("head", "var(--arrow)")}${marker("head-stack", "var(--stack-arrow)")}${marker("head-dim-stack", "var(--ghost)")}${marker("head-hot", "var(--hot)")}${marker("head-hover", "var(--hot)")}${marker("head-ghost", "var(--ghost)")}${[...customMarkers.values()].join("")}${marker("head-dim", "var(--ghost)")}</defs>${dim}${ghosts}${normal}${colored}${hot}`;
   }
 
   // ---------- colour picker ----------

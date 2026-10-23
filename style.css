@@ -7,6 +7,7 @@
   --cur-line: #f1faef; --prev-line: #cdeac8;
   --err-bg: #fcebeb; --err: #a32d2d; --warn-bg: #faeeda; --warn: #854f0b;
   --hot: #d85a30; --chg-bg: #fde4d7; --ghost: #b4b2a9;
+  --stack-arrow: #7048e8; --stack-arrow-soft: #f3f0ff;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
@@ -19,6 +20,7 @@
     --cur-line: #1b2a1d; --prev-line: #24492a;
     --err-bg: #501313; --err: #f09595; --warn-bg: #412402; --warn: #fac775;
     --hot: #f0997b; --chg-bg: #4a2414; --ghost: #6b6a64;
+    --stack-arrow: #b197fc; --stack-arrow-soft: #381e72;
   }
 }
 * { box-sizing: border-box; }
@@ -159,6 +161,26 @@ button:disabled { opacity: .5; cursor: default; }
 .stack-badge.front { background: var(--soft); color: var(--muted); }
 
 .ptr.in-col { display: inline-flex; align-items: center; gap: 4px; min-height: 20px; }
+.ptr.is-stack .dot,
+.is-stack .ptr .dot,
+.ptr.in-col .dot {
+  background: var(--stack-arrow);
+  box-shadow: 0 0 0 1px var(--panel);
+}
+
+.arr-path.arr-stack {
+  stroke: var(--stack-arrow);
+  stroke-dasharray: 6 3.5;
+  stroke-linecap: round;
+}
+.arr-dot.arr-dot-stack {
+  fill: var(--stack-arrow);
+}
+
+.arr-path.arr-tree {
+  stroke: var(--arrow);
+  stroke-width: 2px;
+}
 .ref-chip { font-family: var(--mono); font-size: 11px; line-height: 1.3; padding: 1px 5px; border-radius: 4px;
   background: var(--soft); color: var(--text); border: 1px solid var(--border); white-space: nowrap;
   max-width: 95px; text-overflow: ellipsis; overflow: hidden; cursor: pointer; transition: border-color .15s, background .15s, transform .1s; }
