@@ -73,6 +73,9 @@
   try { arrowStyle = localStorage.getItem("dsaviz-arrows") || "smart"; } catch (_) {}
   let pointerMode = "labels";
   try { pointerMode = localStorage.getItem("dsaviz-pointers") || "labels"; } catch (_) {}
+  let globalAbstractMode = false;
+  try { globalAbstractMode = localStorage.getItem("dsaviz-abstract-mode") === "true"; } catch (_) {}
+  const selectedNodes = new Set();
 
   // ---------- helpers ----------
   const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
@@ -685,14 +688,138 @@
     setOrientation(id, isVertical(id) ? "horizontal" : "vertical");
   }
 
+  function isAbstract(id, o) {
+    if (!o || o.type !== "instance") return false;
+    const key = layout && layout.key.get(id);
+    if (key && colors["abstract|" + key] !== undefined) {
+      return colors["abstract|" + key] === true;
+    }
+    return globalAbstractMode;
+  }
+
+  function setAbstract(id, val, { render: doRender = true } = {}) {
+    const key = layout && layout.key.get(id);
+    if (!key) return;
+    colors["abstract|" + key] = val;
+    saveColors();
+    if (doRender && result) render({});
+  }
+
+  function toggleAbstract(id) {
+    const step = result && result.steps[stepIndex];
+    const o = step && step.heap[id];
+    setAbstract(id, !isAbstract(id, o));
+  }
+
+  function getNodeValue(o) {
+    if (!o) return ["prim", ""];
+    if (o.type !== "instance") {
+      if (o.items) return ["prim", String(o.items.length)];
+      return ["prim", o.repr || ""];
+    }
+    // Prefer common value field names: val, value, data, key, item, elem, v
+    const valAttr = o.attrs.find(([k]) => /^(val|value|data|key|item|elem|v)$/i.test(k));
+    if (valAttr) return valAttr[1];
+    // Otherwise first primitive attribute
+    const primAttr = o.attrs.find(([, v]) => v && v[0] === "prim");
+    if (primAttr) return primAttr[1];
+    // Otherwise first attribute if any
+    if (o.attrs.length > 0) return o.attrs[0][1];
+    return ["prim", o.cls || ""];
+  }
+
+  function formatAbstractVal(v) {
+    if (!v) return "";
+    if (v[0] === "prim") {
+      let s = String(v[1]);
+      if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {
+        s = s.slice(1, -1);
+      }
+      return s;
+    }
+    if (v[0] === "ref") return "→";
+    return String(v);
+  }
+
   function objectHTML(id, o, heap, diff, tags, step) {
     const cell = (key, v, opts = {}) => {
       const ch = diff && diff.changed.has(key);
       return { cls: ch ? " changed" : "", html: valueHTML(v, heap, { ...opts, changed: ch, was: ch ? diff.old.get(key) : null }) };
     };
+    const tagHTML = tags && tags.length
+      ? `<div class="tags">${tags.map((t) => `<span class="ptag${t.local ? " local" : ""}${t.changed ? " changed" : ""}${t.color && t.color.faded ? " faded" : ""}" data-frame="${esc(t.frame)}" data-var="${esc(t.name)}" title="${t.name === "return" ? "return value" : `variable in ${esc(t.frame)}, click to colour it`}"${tagStyle(t)}>${esc(t.name)}</span>`).join("")}</div>`
+      : "";
+
+    if (isAbstract(id, o)) {
+      const rawVal = getNodeValue(o);
+      const valStr = formatAbstractVal(rawVal);
+      const isChanged = diff && [...diff.changed.keys()].some((k) => k.startsWith(id + "|"));
+      const isSelected = selectedNodes.has(id);
+      const isSm = valStr.length > 3;
+
+      // Extract reference attributes for outgoing arrows (ports on circle)
+      const refAttrs = o.attrs.filter(([, v]) => v && v[0] === "ref" && !isHidden(heap, v[1]));
+      const hasLeftRight = refAttrs.some(([k]) => k === "left" || k === "right");
+      const isLinkedList = refAttrs.length === 1 && refAttrs[0][0] === "next";
+
+      const portsHTML = refAttrs.map(([k, v], i) => {
+        let portCls = "";
+        let inlineStyle = "";
+        if (hasLeftRight) {
+          if (k === "left") portCls = "port-left";
+          else if (k === "right") portCls = "port-right";
+          else {
+            const pct = 20 + (i / Math.max(1, refAttrs.length - 1)) * 60;
+            inlineStyle = ` style="left:${pct}%;bottom:2px;transform:translateX(-50%);"`;
+          }
+        } else if (isLinkedList) {
+          portCls = "port-next";
+        } else {
+          const pct = refAttrs.length === 1 ? 50 : (20 + (i / (refAttrs.length - 1)) * 60);
+          inlineStyle = ` style="left:${pct}%;bottom:2px;transform:translateX(-50%);"`;
+        }
+        const c = cell(fieldKey(id, o, 0, k), v);
+        return `<span class="abstract-port ${portCls}"${inlineStyle} title="${esc(k)}">${c.html}</span>`;
+      }).join("");
+
+      // Tooltip attributes table
+      const tooltipRows = o.attrs.length ? o.attrs.map(([k, v]) => {
+        const isPrim = v && v[0] === "prim";
+        const targetId = v && v[0] === "ref" ? v[1] : null;
+        let vDisplay = "";
+        if (isPrim) {
+          vDisplay = `<span class="val">${esc(v[1])}</span>`;
+        } else if (targetId && heap[targetId]) {
+          vDisplay = `<span class="chip">→ ${esc(shortName(heap, targetId, step))}</span>`;
+        } else {
+          vDisplay = `<span class="val muted">None</span>`;
+        }
+        const ch = diff && diff.changed.has(fieldKey(id, o, 0, k));
+        return `<tr><td class="k">${esc(k)}</td><td class="v${ch ? " changed" : ""}">${vDisplay}</td></tr>`;
+      }).join("") : `<tr><td colspan="2" class="plain muted">no attributes</td></tr>`;
+
+      const tooltipHTML = `
+        <div class="abstract-tooltip" role="tooltip">
+          <div class="tooltip-head">
+            <span class="tooltip-cls">${esc(o.cls || "Node")}</span>
+            <button class="expand-btn mini" data-id="${id}" title="Show full rectangular details">Expand ▤</button>
+          </div>
+          <table>${tooltipRows}</table>
+        </div>`;
+
+      return `<div class="obj abstract-node${isChanged ? " changed" : ""}${isSelected ? " selected" : ""}" data-id="${id}">${tagHTML}
+        <div class="abstract-circle" title="${esc(o.cls || "Node")}: ${esc(valStr)}">
+          <span class="abstract-val${isSm ? " sm" : ""}">${esc(valStr)}</span>
+          ${portsHTML}
+        </div>
+        ${tooltipHTML}
+      </div>`;
+    }
+
     let head = "", body = "", headActions = "";
     if (o.type === "instance") {
       head = o.cls;
+      headActions = `<span class="obj-actions"><button class="abstract-btn" data-id="${id}" title="Show as abstract circle">⊚ abstract</button></span>`;
       body = o.attrs.length
         ? `<table>${o.attrs.map(([k, v]) => { const c = cell(fieldKey(id, o, 0, k), v); return `<tr><td class="k">${esc(k)}</td><td class="v${c.cls}">${c.html}</td></tr>`; }).join("")}</table>`
         : `<div class="plain muted">no attributes</div>`;
@@ -732,10 +859,8 @@
     } else {
       head = o.cls || "object"; body = `<div class="plain">${esc(o.repr || "")}</div>`;
     }
-    const tagHTML = tags && tags.length
-      ? `<div class="tags">${tags.map((t) => `<span class="ptag${t.local ? " local" : ""}${t.changed ? " changed" : ""}${t.color && t.color.faded ? " faded" : ""}" data-frame="${esc(t.frame)}" data-var="${esc(t.name)}" title="${t.name === "return" ? "return value" : `variable in ${esc(t.frame)}, click to colour it`}"${tagStyle(t)}>${esc(t.name)}</span>`).join("")}</div>`
-      : "";
-    return `<div class="obj" data-id="${id}">${tagHTML}<div class="obj-head"><span class="obj-type">${esc(head)}</span>${headActions}</div>${body}</div>`;
+    const isSelected = selectedNodes.has(id);
+    return `<div class="obj${isSelected ? " selected" : ""}" data-id="${id}">${tagHTML}<div class="obj-head"><span class="obj-type">${esc(head)}</span>${headActions}</div>${body}</div>`;
   }
 
   function tagStyle(t) {
@@ -963,6 +1088,9 @@
 
     // objects
     if (!layout) computeLayout();
+    for (const id of selectedNodes) {
+      if (!heap[id]) selectedNodes.delete(id);
+    }
     const visible = Object.keys(heap).filter((id) => heap[id] && !isHidden(heap, id) && layout.pos.has(id));
     const heapEl = $("heap");
     heapEl.innerHTML = visible.map((id) => objectHTML(id, heap[id], heap, diff, tags.get(id), step)).join("");
@@ -1010,6 +1138,7 @@
     heapEl.style.height = maxH + "px";
     $("reset-layout").disabled = moved.size === 0;
 
+    updateSelectionUI();
     drawArrows();
   }
 
@@ -1039,31 +1168,50 @@
       // Every arrow ends with a short straight run into the box, so the arrowhead
       // points the same way as the line it sits on, however sharp the curve.
       const HEAD = 9;
+      const isCircle = toEl.classList.contains("abstract-node");
+      const fromCircle = from.closest ? !!from.closest(".abstract-node") : false;
+      const cy = (T + B) / 2;
+      const cx = (L + R) / 2;
       const leftEntry = () => {
-        const tx = L - 1, ty = T + 12, dx = Math.max(40, Math.abs(tx - sx) / 2);
+        const tx = L - 1, ty = isCircle ? cy : T + 12, dx = Math.max(40, Math.abs(tx - sx) / 2);
         return `M${sx} ${sy} C ${sx + dx} ${sy}, ${tx - HEAD - dx} ${ty}, ${tx - HEAD} ${ty} L ${tx} ${ty}`;
       };
       let d;
-      if (arrowStyle === "classic" || L >= sx + 12) {
+      if (arrowStyle === "classic") {
+        d = leftEntry();
+      } else if (isCircle && T > sy + 15) {
+        // Tree / graph arrow entering circle from the top
+        const tx = cx, ty = T - 1;
+        const dy = Math.max(25, (ty - sy) / 2);
+        const ey = ty - HEAD;
+        const dx = fromCircle ? (tx - sx) * 0.25 : 30;
+        d = `M${sx} ${sy} C ${sx + dx} ${sy + dy * 0.5}, ${tx} ${ey - dy * 0.5}, ${tx} ${ey} L ${tx} ${ty}`;
+      } else if (isCircle && B < sy - 15) {
+        // Arrow entering circle from the bottom
+        const tx = cx, ty = B + 1;
+        const dy = Math.max(25, (sy - ty) / 2);
+        const ey = ty + HEAD;
+        const dx = fromCircle ? (tx - sx) * 0.25 : 30;
+        d = `M${sx} ${sy} C ${sx + dx} ${sy - dy * 0.5}, ${tx} ${ey + dy * 0.5}, ${tx} ${ey} L ${tx} ${ty}`;
+      } else if (L >= sx + 12) {
         d = leftEntry();
       } else if (B < sy - 8 || T > sy + 8) {
         if (R + 16 < sx) {
-          const tx = R + 1, ty = Math.min(B - 12, Math.max(T + 12, sy));
+          const tx = R + 1, ty = isCircle ? cy : Math.min(B - 12, Math.max(T + 12, sy));
           const out = Math.max(36, Math.min(80, Math.abs(ty - sy) / 2));
           d = `M${sx} ${sy} C ${sx + out} ${sy}, ${tx + HEAD + out} ${ty}, ${tx + HEAD} ${ty} L ${tx} ${ty}`;
         } else {
           const up = B < sy;
-          const tx = Math.min(R - 14, Math.max(L + 14, (L + R) / 2)), ty = up ? B + 1 : T - 1;
+          const tx = isCircle ? cx : Math.min(R - 14, Math.max(L + 14, (L + R) / 2)), ty = up ? B + 1 : T - 1;
           const dy = Math.max(30, Math.abs(ty - sy) / 2);
           const ey = up ? ty + HEAD : ty - HEAD;
-          d = `M${sx} ${sy} C ${sx + 40} ${sy}, ${tx} ${up ? ey + dy : ey - dy}, ${tx} ${ey} L ${tx} ${ty}`;
+          const outX = fromCircle ? (tx < sx ? -15 : 15) : 40;
+          d = `M${sx} ${sy} C ${sx + outX} ${sy}, ${tx} ${up ? ey + dy : ey - dy}, ${tx} ${ey} L ${tx} ${ty}`;
         }
       } else {
-        // Arc over the row, clearing any name tags, and land near the box's
-        // right end (tags sit on the left).
         const tags = toEl.querySelector(".tags");
         const tagH = tags ? tags.offsetHeight + 4 : 0;
-        const tx = Math.max(L + 14, R - 16), ty = T - 1;
+        const tx = isCircle ? cx : Math.max(L + 14, R - 16), ty = T - 1;
         const lift = Math.max(2, Math.min(T - tagH, sy) - 34);
         d = `M${sx} ${sy} C ${sx + 50} ${lift}, ${tx} ${lift}, ${tx} ${ty - HEAD} L ${tx} ${ty}`;
       }
@@ -1075,7 +1223,7 @@
       const p = curve(el, target);
       ghosts += `<path d="${p.d}" fill="none" stroke="var(--ghost)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#head-ghost)"/>`;
     });
-    viz.querySelectorAll(".ptr[data-ref]").forEach((ptr, idx) => {
+    viz.querySelectorAll(".ptr[data-ref]:not(.abstract-tooltip .ptr)").forEach((ptr, idx) => {
       const target = viz.querySelector(`.obj[data-id="${ptr.dataset.ref}"]`);
       if (!target) return;
       const arrId = "arr-" + idx;
@@ -1163,8 +1311,17 @@
         <button class="pop-orient-btn${isVert ? " on" : ""}" data-id="${id}" data-orient="vertical">Vertical ⇅</button>
       </div>`;
     }
+    let abstractSection = "";
+    if (o && o.type === "instance") {
+      const abs = isAbstract(id, o);
+      abstractSection = `<div class="pop-label">Node style</div><div class="pop-row seg">
+        <button class="pop-abstract-btn${!abs ? " on" : ""}" data-id="${id}" data-abstract="false">Details ▤</button>
+        <button class="pop-abstract-btn${abs ? " on" : ""}" data-id="${id}" data-abstract="true">Circle ⊚</button>
+      </div>`;
+    }
     pop.innerHTML = `<div class="pop-title"><code>${esc(shortName(step.heap, id, step))}</code> <span class="muted">box</span></div>
       ${orientSection}
+      ${abstractSection}
       <div class="pop-row"><button class="pop-fade${c.faded ? " on" : ""}" aria-pressed="${!!c.faded}">${c.faded ? "Faded" : "Fade this box"} ◐</button></div>
       <div class="pop-foot"><span class="muted">Fades the box and the arrows leaving it.</span><button class="pop-reset">Reset</button></div>`;
     placePop(anchor);
@@ -1196,9 +1353,17 @@
       setOrientation(orientBtn.dataset.id, orientBtn.dataset.orient);
       pop.querySelectorAll(".pop-orient-btn").forEach((btn) => btn.classList.toggle("on", btn === orientBtn));
     }
+    const absBtn = e.target.closest(".pop-abstract-btn");
+    if (absBtn) {
+      setAbstract(absBtn.dataset.id, absBtn.dataset.abstract === "true");
+      pop.querySelectorAll(".pop-abstract-btn").forEach((btn) => btn.classList.toggle("on", btn === absBtn));
+    }
     if (e.target.closest(".pop-reset") && popTarget) {
       delete colors[popTarget];
-      if (popTarget.startsWith("box|")) delete colors["orient|" + popTarget.slice(4)];
+      if (popTarget.startsWith("box|")) {
+        delete colors["orient|" + popTarget.slice(4)];
+        delete colors["abstract|" + popTarget.slice(4)];
+      }
       saveColors();
       if (result) render({});
       closePicker();
@@ -1249,12 +1414,34 @@
   // Name tags live inside draggable boxes, so a tap on a tag is detected in the
   // drag handler below (a press and release that didn't move).
 
-  // ---------- dragging ----------
+  function updateSelectionUI() {
+    const heapEl = $("heap");
+    if (!heapEl) return;
+    heapEl.querySelectorAll(".obj").forEach((el) => {
+      el.classList.toggle("selected", selectedNodes.has(el.dataset.id));
+    });
+    const selBar = $("selection-bar");
+    const countEl = $("selection-count");
+    if (selBar && countEl) {
+      if (selectedNodes.size > 0) {
+        selBar.hidden = false;
+        countEl.textContent = `${selectedNodes.size} selected`;
+      } else {
+        selBar.hidden = true;
+      }
+    }
+  }
+
+  // ---------- dragging & selection ----------
   // Boxes can be dragged anywhere in the drawing area. A dragged box keeps its
   // spot for every step, and across edits; "Reset layout" puts everything back.
+  // Multiple boxes can be selected with Ctrl/Cmd+click or by dragging a selection
+  // box over them, and dragged together as a group.
   (function enableDragging() {
     const heapEl = $("heap");
     let drag = null;
+    let marquee = null;
+
     heapEl.addEventListener("pointerdown", (e) => {
       const orientBtn = e.target.closest(".orient-btn");
       if (orientBtn) {
@@ -1263,42 +1450,280 @@
         toggleOrientation(orientBtn.dataset.id);
         return;
       }
+      const absBtn = e.target.closest(".abstract-btn, .expand-btn");
+      if (absBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        toggleAbstract(absBtn.dataset.id);
+        return;
+      }
+
+      const isMulti = e.metaKey || e.ctrlKey || e.shiftKey;
       const el = e.target.closest(".obj");
-      if (!el || e.button !== 0 || !layout) return;
+
+      // Clicking on heap background: start marquee selection
+      if (!el) {
+        if (e.button !== 0 || !layout) return;
+        if (e.target.closest("button, select, input, .selection-bar")) return;
+        if (!isMulti) {
+          selectedNodes.clear();
+          updateSelectionUI();
+        }
+        const heapBox = heapEl.getBoundingClientRect();
+        const startHeapX = e.clientX - heapBox.left;
+        const startHeapY = e.clientY - heapBox.top;
+        const marqueeEl = document.createElement("div");
+        marqueeEl.className = "selection-marquee";
+        marqueeEl.style.left = startHeapX + "px";
+        marqueeEl.style.top = startHeapY + "px";
+        marqueeEl.style.width = "0px";
+        marqueeEl.style.height = "0px";
+        heapEl.appendChild(marqueeEl);
+        marquee = {
+          el: marqueeEl,
+          startX: e.clientX,
+          startY: e.clientY,
+          startHeapX,
+          startHeapY,
+          initial: new Set(selectedNodes),
+          isMulti,
+          movedPx: 0
+        };
+        heapEl.setPointerCapture(e.pointerId);
+        return;
+      }
+
+      if (e.button !== 0 || !layout) return;
       e.preventDefault();
-      drag = { el, key: layout.key.get(el.dataset.id), px: e.clientX, py: e.clientY, x: el.offsetLeft, y: el.offsetTop,
-               tag: e.target.closest(".ptag[data-var]"), head: e.target.closest(".obj-head"), movedPx: 0 };
+
+      const id = el.dataset.id;
+      if (isMulti) {
+        if (selectedNodes.has(id)) selectedNodes.delete(id);
+        else selectedNodes.add(id);
+        updateSelectionUI();
+      } else if (!selectedNodes.has(id)) {
+        selectedNodes.clear();
+        selectedNodes.add(id);
+        updateSelectionUI();
+      }
+
+      const isGroup = selectedNodes.has(id) && selectedNodes.size > 1;
+      const group = (isGroup ? [...selectedNodes] : [id]).map((objId) => {
+        const itemEl = heapEl.querySelector(`.obj[data-id="${objId}"]`);
+        if (!itemEl || !layout) return null;
+        return {
+          el: itemEl,
+          key: layout.key.get(objId),
+          startX: itemEl.offsetLeft,
+          startY: itemEl.offsetTop,
+          tag: itemEl.querySelector(".tags")
+        };
+      }).filter(Boolean);
+
+      drag = {
+        el,
+        key: layout.key.get(id),
+        px: e.clientX,
+        py: e.clientY,
+        tag: e.target.closest(".ptag[data-var]"),
+        head: e.target.closest(".obj-head"),
+        circle: e.target.closest(".abstract-circle"),
+        movedPx: 0,
+        group,
+        wasMulti: isMulti,
+        clickedId: id
+      };
       el.classList.add("dragging");
       el.setPointerCapture(e.pointerId);
     });
+
     heapEl.addEventListener("pointermove", (e) => {
+      if (marquee) {
+        marquee.movedPx = Math.max(marquee.movedPx, Math.abs(e.clientX - marquee.startX) + Math.abs(e.clientY - marquee.startY));
+        const heapBox = heapEl.getBoundingClientRect();
+        const curHeapX = e.clientX - heapBox.left;
+        const curHeapY = e.clientY - heapBox.top;
+        const left = Math.min(marquee.startHeapX, curHeapX);
+        const top = Math.min(marquee.startHeapY, curHeapY);
+        const width = Math.abs(curHeapX - marquee.startHeapX);
+        const height = Math.abs(curHeapY - marquee.startHeapY);
+        marquee.el.style.left = left + "px";
+        marquee.el.style.top = top + "px";
+        marquee.el.style.width = width + "px";
+        marquee.el.style.height = height + "px";
+
+        heapEl.querySelectorAll(".obj").forEach((obj) => {
+          const id = obj.dataset.id;
+          const oL = obj.offsetLeft, oT = obj.offsetTop;
+          const oR = oL + obj.offsetWidth, oB = oT + obj.offsetHeight;
+          const hit = !(oL > left + width || oR < left || oT > top + height || oB < top);
+          if (marquee.isMulti) {
+            if (hit) {
+              if (marquee.initial.has(id)) selectedNodes.delete(id);
+              else selectedNodes.add(id);
+            } else {
+              if (marquee.initial.has(id)) selectedNodes.add(id);
+              else selectedNodes.delete(id);
+            }
+          } else {
+            if (hit) selectedNodes.add(id);
+            else selectedNodes.delete(id);
+          }
+        });
+        updateSelectionUI();
+        return;
+      }
+
       if (!drag) return;
       drag.movedPx = Math.max(drag.movedPx, Math.abs(e.clientX - drag.px) + Math.abs(e.clientY - drag.py));
       if (drag.movedPx < 4) return;
-      const x = Math.max(0, drag.x + e.clientX - drag.px);
-      const tagEl = drag.el.querySelector(".tags");
-      const y = Math.max(tagEl ? tagEl.offsetHeight + 4 : 0, drag.y + e.clientY - drag.py);
-      drag.el.style.left = x + "px";
-      drag.el.style.top = y + "px";
-      moved.set(drag.key, { x, y });
+
+      const dx = e.clientX - drag.px;
+      const dy = e.clientY - drag.py;
+      let maxW = heapEl.offsetWidth, maxH = heapEl.offsetHeight;
+
+      drag.group.forEach((item) => {
+        const tagH = item.tag ? item.tag.offsetHeight + 4 : 0;
+        const x = Math.max(0, item.startX + dx);
+        const y = Math.max(tagH, item.startY + dy);
+        item.el.style.left = x + "px";
+        item.el.style.top = y + "px";
+        moved.set(item.key, { x, y });
+        maxW = Math.max(maxW, x + item.el.offsetWidth);
+        maxH = Math.max(maxH, y + item.el.offsetHeight);
+      });
+
+      heapEl.style.width = maxW + "px";
+      heapEl.style.height = maxH + "px";
       drag.didMove = true;
-      heapEl.style.width = Math.max(heapEl.offsetWidth, x + drag.el.offsetWidth) + "px";
-      heapEl.style.height = Math.max(heapEl.offsetHeight, y + drag.el.offsetHeight) + "px";
       $("reset-layout").disabled = false;
       drawArrows();
     });
+
     const end = (e) => {
+      if (marquee) {
+        marquee.el.remove();
+        marquee = null;
+        return;
+      }
       if (!drag) return;
       drag.el.classList.remove("dragging");
-      const tag = drag.tag, head = drag.head, id = drag.el.dataset.id, tapped = !drag.didMove && e.type === "pointerup";
+      const tag = drag.tag, head = drag.head, circle = drag.circle, id = drag.clickedId, tapped = !drag.didMove && e.type === "pointerup";
+      const wasMulti = drag.wasMulti;
       drag = null;
+
+      if (tapped && !wasMulti) {
+        selectedNodes.clear();
+        selectedNodes.add(id);
+        updateSelectionUI();
+      }
+
       if (tapped && tag && tag.dataset.var !== "return") openPicker(tag.dataset.frame, tag.dataset.var, tag);
-      else if (tapped && head) openBoxPicker(id, head);
+      else if (tapped && (head || circle)) openBoxPicker(id, head || circle);
     };
+
     heapEl.addEventListener("pointerup", end);
     heapEl.addEventListener("pointercancel", end);
+
+    heapEl.addEventListener("pointerover", (e) => {
+      const node = e.target.closest(".obj.abstract-node");
+      if (node) {
+        const r = node.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - r.bottom;
+        node.classList.toggle("tooltip-top", spaceBelow < 180 && r.top > 180);
+      }
+    });
+
     $("reset-layout").addEventListener("click", () => { moved.clear(); if (result) render({}); });
   })();
+
+  // Selection bar action buttons
+  const selAbstract = $("sel-abstract");
+  if (selAbstract) {
+    selAbstract.addEventListener("click", () => {
+      selectedNodes.forEach((id) => setAbstract(id, true, { render: false }));
+      saveColors();
+      if (result) render({});
+    });
+  }
+  const selDetail = $("sel-detail");
+  if (selDetail) {
+    selDetail.addEventListener("click", () => {
+      selectedNodes.forEach((id) => setAbstract(id, false, { render: false }));
+      saveColors();
+      if (result) render({});
+    });
+  }
+  const selFade = $("sel-fade");
+  if (selFade) {
+    selFade.addEventListener("click", () => {
+      if (!layout) return;
+      const anyUnfaded = [...selectedNodes].some((id) => {
+        const key = layout.key.get(id);
+        return !colors["box|" + key] || !colors["box|" + key].faded;
+      });
+      selectedNodes.forEach((id) => {
+        const key = layout.key.get(id);
+        if (!key) return;
+        const target = "box|" + key;
+        const c = { ...(colors[target] || {}) };
+        if (anyUnfaded) c.faded = true;
+        else delete c.faded;
+        if (c.line || c.border || c.faded) colors[target] = c;
+        else delete colors[target];
+      });
+      saveColors();
+      if (result) render({});
+    });
+  }
+  const selClear = $("sel-clear");
+  if (selClear) {
+    selClear.addEventListener("click", () => {
+      selectedNodes.clear();
+      updateSelectionUI();
+    });
+  }
+
+  // Global abstract mode checkbox
+  const abstractBox = $("abstract-mode");
+  if (abstractBox) {
+    abstractBox.checked = globalAbstractMode;
+    abstractBox.addEventListener("change", () => {
+      globalAbstractMode = abstractBox.checked;
+      try { localStorage.setItem("dsaviz-abstract-mode", String(globalAbstractMode)); } catch (_) {}
+      if (result) render({});
+    });
+  }
+
+  // Keyboard shortcut: Escape to clear selection, A to toggle abstract mode
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+    if (e.key === "Escape") {
+      if (selectedNodes.size > 0) {
+        selectedNodes.clear();
+        updateSelectionUI();
+        return;
+      }
+    }
+    if ((e.key === "a" || e.key === "A") && !e.metaKey && !e.ctrlKey) {
+      if (selectedNodes.size > 0) {
+        const step = result && result.steps[stepIndex];
+        const anyNonAbstract = [...selectedNodes].some((id) => {
+          const o = step && step.heap[id];
+          return !isAbstract(id, o);
+        });
+        selectedNodes.forEach((id) => setAbstract(id, anyNonAbstract, { render: false }));
+        saveColors();
+        if (result) render({});
+      } else {
+        const box = $("abstract-mode");
+        if (box) {
+          box.checked = !box.checked;
+          box.dispatchEvent(new Event("change"));
+        }
+      }
+    }
+  });
 
   // ---------- hover & click interactions ----------
   (function enableInteractions() {
