@@ -91,6 +91,39 @@ print(tree_sum(a))
 `,
   },
   {
+    name: "Binary tree: depth-first traversal (stack)",
+    code: `class Node:
+  def __init__(self, val):
+    self.val = val
+    self.left = None
+    self.right = None
+
+def depth_first_values(root):
+  current = root
+  ret = []
+  stack = []
+  stack.append(root)
+
+  while len(stack) != 0:
+    current = stack.pop()
+    if current is not None:
+      if current.right is not None:
+        stack.append(current.right)
+      if current.left is not None:
+        stack.append(current.left)
+      ret.append(current.val)
+  return ret
+
+a = Node("a"); b = Node("b"); c = Node("c")
+d = Node("d"); e = Node("e"); f = Node("f")
+a.left = b; a.right = c
+b.left = d; b.right = e
+c.right = f
+
+print(depth_first_values(a))
+`,
+  },
+  {
     name: "Lists: aliasing vs copying",
     code: `nums = [1, 2, 3]
 alias = nums

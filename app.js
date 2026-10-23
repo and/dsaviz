@@ -624,7 +624,7 @@
     return v[0] === "prim" ? v[1] : shortName(heap, v[1], step);
   }
 
-  // opts: { changed: bool, was: old encoded value, frame: bool }
+  // opts: { changed: bool, was: old encoded value, frame: bool, inCollection: bool }
   function valueHTML(v, heap, opts = {}) {
     const was = opts.was && opts.was[0] === "ref" && !(v[0] === "ref" && v[1] === opts.was[1]) ? opts.was[1] : null;
     const wasAttr = was ? ` data-was="${was}"` : "";
@@ -640,7 +640,13 @@
     if (opts.frame && pointerMode === "labels" && heap[id]) {
       return `<span class="chip${opts.changed ? " changed" : ""}"${line ? ` style="color:${line}"` : ""}>→ ${esc(shortName(heap, id))}</span>`;
     }
-    return `<span class="ptr${opts.frame ? " fptr" : ""}" data-ref="${id}"${opts.changed ? ' data-changed="1"' : ""}${opts.color && opts.color.faded ? ' data-faded="1"' : ""}${line ? ` data-color="${line}"` : ""}${wasAttr}><span class="dot"${line ? ` style="background:${line}"` : ""}></span></span>`;
+    const targetObj = heap[id];
+    let chip = "";
+    if (opts.inCollection && targetObj) {
+      const name = shortName(heap, id);
+      chip = `<span class="ref-chip${opts.changed ? " changed" : ""}" title="Points to ${esc(name)} (click to locate)">${esc(name)}</span>`;
+    }
+    return `<span class="ptr${opts.frame ? " fptr" : ""}${opts.inCollection ? " in-col" : ""}" data-ref="${id}"${opts.changed ? ' data-changed="1"' : ""}${opts.color && opts.color.faded ? ' data-faded="1"' : ""}${line ? ` data-color="${line}"` : ""}${wasAttr}>${chip}<span class="dot"${line ? ` style="background:${line}"` : ""}></span></span>`;
   }
 
   function childRefs(o) {
@@ -657,10 +663,10 @@
   const fieldKey = (id, o, i, k) => o.type === "instance" ? `${id}|.${k}` : o.type === "dict" ? `${id}|{${k}}` : `${id}|[${i}]`;
   const varKey = (f, name) => `${f.fid}|${name}`;
 
-  function objectHTML(id, o, heap, diff, tags) {
-    const cell = (key, v) => {
+  function objectHTML(id, o, heap, diff, tags, step) {
+    const cell = (key, v, opts = {}) => {
       const ch = diff && diff.changed.has(key);
-      return { cls: ch ? " changed" : "", html: valueHTML(v, heap, { changed: ch, was: ch ? diff.old.get(key) : null }) };
+      return { cls: ch ? " changed" : "", html: valueHTML(v, heap, { ...opts, changed: ch, was: ch ? diff.old.get(key) : null }) };
     };
     let head = "", body = "";
     if (o.type === "instance") {
@@ -671,20 +677,28 @@
     } else if (o.type === "dict") {
       head = "dict";
       const rows = o.items.map(([k, v]) => {
-        const c = cell(fieldKey(id, o, 0, k[0] === "prim" ? k[1] : "?"), v);
-        return `<tr><td class="k">${valueHTML(k, heap)}</td><td class="v${c.cls}">${c.html}</td></tr>`;
+        const ck = cell(fieldKey(id, o, 0, k[0] === "prim" ? k[1] : "?"), k, { inCollection: true });
+        const cv = cell(fieldKey(id, o, 0, k[0] === "prim" ? k[1] : "?"), v, { inCollection: true });
+        return `<tr><td class="k">${ck.html}</td><td class="v${cv.cls}">${cv.html}</td></tr>`;
       }).join("");
       body = o.items.length ? `<table>${rows}</table>` : `<div class="plain muted">empty</div>`;
       if (o.more) body += `<div class="plain muted">+${o.more} more</div>`;
     } else if (o.items) {
       head = o.type;
+      const vname = (step && varNameFor(step, id)) || "";
+      const isStack = /\bstack\b/i.test(vname);
+      const isQueue = /\bqueue\b/i.test(vname);
       const showIdx = o.type === "list" || o.type === "tuple";
       const cells = o.items.map((v, i) => {
-        const c = cell(fieldKey(id, o, i), v);
-        return `<div class="cell${c.cls}">${showIdx ? `<span class="idx">${i}</span>` : ""}<span class="v">${c.html}</span></div>`;
+        const c = cell(fieldKey(id, o, i), v, { inCollection: true });
+        const isTop = isStack && i === o.items.length - 1;
+        const isFront = isQueue && i === 0;
+        const badge = isTop ? `<span class="stack-badge top" title="Top of stack">top</span>` : (isFront ? `<span class="stack-badge front" title="Front of queue">front</span>` : "");
+        return `<div class="cell${c.cls}">${showIdx ? `<span class="idx">${i}${badge}</span>` : ""}<span class="v">${c.html}</span></div>`;
       }).join("");
+      const emptyLabel = isStack ? "empty stack" : (isQueue ? "empty queue" : "empty");
       body = o.items.length ? `<div class="cells">${cells}${o.more ? `<div class="cell"><span class="v muted">+${o.more}</span></div>` : ""}</div>`
-                            : `<div class="cells muted">empty</div>`;
+                            : `<div class="cells muted">${emptyLabel}</div>`;
     } else if (o.type === "function") {
       head = "function"; body = `<div class="plain">${esc(o.name)}(…)</div>`;
     } else if (o.type === "class") {
@@ -927,7 +941,7 @@
     if (!layout) computeLayout();
     const visible = Object.keys(heap).filter((id) => heap[id] && !isHidden(heap, id) && layout.pos.has(id));
     const heapEl = $("heap");
-    heapEl.innerHTML = visible.map((id) => objectHTML(id, heap[id], heap, diff, tags.get(id))).join("");
+    heapEl.innerHTML = visible.map((id) => objectHTML(id, heap[id], heap, diff, tags.get(id), step)).join("");
     heapEl.querySelectorAll(".obj").forEach((el) => {
       const c = colors["box|" + layout.key.get(el.dataset.id)];
       if (c && c.faded) el.classList.add("faded");
@@ -994,7 +1008,8 @@
     //   - box to the left on the same row (or the node itself): arc over the top.
     // "classic" always enters the left edge, like Python Tutor.
     const curve = (from, toEl) => {
-      const a = from.getBoundingClientRect(), b = toEl.getBoundingClientRect();
+      const dot = from.querySelector ? (from.querySelector(".dot") || from) : from;
+      const a = dot.getBoundingClientRect(), b = toEl.getBoundingClientRect();
       const sx = a.left + a.width / 2 - box.left, sy = a.top + a.height / 2 - box.top;
       const L = b.left - box.left, T = b.top - box.top, R = b.right - box.left, B = b.bottom - box.top;
       // Every arrow ends with a short straight run into the box, so the arrowhead
@@ -1036,12 +1051,14 @@
       const p = curve(el, target);
       ghosts += `<path d="${p.d}" fill="none" stroke="var(--ghost)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#head-ghost)"/>`;
     });
-    viz.querySelectorAll(".ptr[data-ref]").forEach((ptr) => {
+    viz.querySelectorAll(".ptr[data-ref]").forEach((ptr, idx) => {
       const target = viz.querySelector(`.obj[data-id="${ptr.dataset.ref}"]`);
       if (!target) return;
+      const arrId = "arr-" + idx;
+      ptr.dataset.arrId = arrId;
       const p = curve(ptr, target);
       if (ptr.dataset.faded || ptr.closest(".obj.faded")) {
-        dim += `<path d="${p.d}" fill="none" stroke="${ptr.dataset.color || "var(--arrow)"}" stroke-width="1.5" opacity=".2" marker-end="url(#head-dim)"/>`;
+        dim += `<path class="arr-path" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="${ptr.dataset.color || "var(--arrow)"}" stroke-width="1.5" opacity=".2" marker-end="url(#head-dim)"/>`;
         return;
       }
       const col = ptr.dataset.color;
@@ -1049,15 +1066,15 @@
         const mid = "head-" + col.replace(/[^a-z0-9]/gi, "");
         if (!customMarkers.has(mid)) customMarkers.set(mid, marker(mid, col));
         const w = ptr.dataset.changed ? 2.8 : 2;
-        const seg = `<circle cx="${p.sx}" cy="${p.sy}" r="3.5" fill="${col}"/><path d="${p.d}" fill="none" stroke="${col}" stroke-width="${w}" marker-end="url(#${mid})"/>`;
+        const seg = `<circle class="arr-dot" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" cx="${p.sx}" cy="${p.sy}" r="3.5" fill="${col}"/><path class="arr-path" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="${col}" stroke-width="${w}" marker-end="url(#${mid})"/>`;
         if (ptr.dataset.changed) hot += seg; else colored += seg;
       } else if (ptr.dataset.changed) {
-        hot += `<circle cx="${p.sx}" cy="${p.sy}" r="3.5" fill="var(--hot)"/><path d="${p.d}" fill="none" stroke="var(--hot)" stroke-width="2.6" marker-end="url(#head-hot)"/>`;
+        hot += `<circle class="arr-dot" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" cx="${p.sx}" cy="${p.sy}" r="3.5" fill="var(--hot)"/><path class="arr-path" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="var(--hot)" stroke-width="2.6" marker-end="url(#head-hot)"/>`;
       } else {
-        normal += `<circle cx="${p.sx}" cy="${p.sy}" r="3" fill="var(--arrow)"/><path d="${p.d}" fill="none" stroke="var(--arrow)" stroke-width="1.5" marker-end="url(#head)"/>`;
+        normal += `<circle class="arr-dot" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" cx="${p.sx}" cy="${p.sy}" r="3" fill="var(--arrow)"/><path class="arr-path" data-arr-id="${arrId}" data-to-id="${ptr.dataset.ref}" d="${p.d}" fill="none" stroke="var(--arrow)" stroke-width="1.5" marker-end="url(#head)"/>`;
       }
     });
-    svg.innerHTML = `<defs>${marker("head", "var(--arrow)")}${marker("head-hot", "var(--hot)")}${marker("head-ghost", "var(--ghost)")}${[...customMarkers.values()].join("")}${marker("head-dim", "var(--ghost)")}</defs>${dim}${ghosts}${normal}${colored}${hot}`;
+    svg.innerHTML = `<defs>${marker("head", "var(--arrow)")}${marker("head-hot", "var(--hot)")}${marker("head-hover", "var(--hot)")}${marker("head-ghost", "var(--ghost)")}${[...customMarkers.values()].join("")}${marker("head-dim", "var(--ghost)")}</defs>${dim}${ghosts}${normal}${colored}${hot}`;
   }
 
   // ---------- colour picker ----------
@@ -1209,6 +1226,47 @@
     heapEl.addEventListener("pointerup", end);
     heapEl.addEventListener("pointercancel", end);
     $("reset-layout").addEventListener("click", () => { moved.clear(); if (result) render({}); });
+  })();
+
+  // ---------- hover & click interactions ----------
+  (function enableInteractions() {
+    const viz = $("viz");
+
+    viz.addEventListener("pointerover", (e) => {
+      const ptr = e.target.closest(".ptr[data-ref]");
+      const obj = e.target.closest(".obj[data-id]");
+
+      if (ptr && ptr.dataset.ref) {
+        const toId = ptr.dataset.ref;
+        const arrId = ptr.dataset.arrId;
+        if (arrId) viz.querySelectorAll(`.arr-path[data-arr-id="${arrId}"], .arr-dot[data-arr-id="${arrId}"]`).forEach((el) => el.classList.add("hover-active"));
+        const target = viz.querySelector(`.obj[data-id="${toId}"]`);
+        if (target) target.classList.add("target-active");
+      } else if (obj && !ptr) {
+        const id = obj.dataset.id;
+        viz.querySelectorAll(`.arr-path[data-to-id="${id}"], .arr-dot[data-to-id="${id}"]`).forEach((el) => el.classList.add("hover-active"));
+        viz.querySelectorAll(`.ptr[data-ref="${id}"]`).forEach((el) => el.classList.add("source-active"));
+      }
+    });
+
+    viz.addEventListener("pointerout", (e) => {
+      viz.querySelectorAll(".hover-active").forEach((el) => el.classList.remove("hover-active"));
+      viz.querySelectorAll(".target-active").forEach((el) => el.classList.remove("target-active"));
+      viz.querySelectorAll(".source-active").forEach((el) => el.classList.remove("source-active"));
+    });
+
+    viz.addEventListener("click", (e) => {
+      const chip = e.target.closest(".ref-chip");
+      if (!chip) return;
+      const ptr = chip.closest(".ptr[data-ref]");
+      if (!ptr) return;
+      const target = viz.querySelector(`.obj[data-id="${ptr.dataset.ref}"]`);
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+        target.classList.add("target-pulse");
+        setTimeout(() => target.classList.remove("target-pulse"), 1200);
+      }
+    });
   })();
 
   boot();
