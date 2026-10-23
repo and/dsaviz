@@ -663,12 +663,34 @@
   const fieldKey = (id, o, i, k) => o.type === "instance" ? `${id}|.${k}` : o.type === "dict" ? `${id}|{${k}}` : `${id}|[${i}]`;
   const varKey = (f, name) => `${f.fid}|${name}`;
 
+  function isVertical(id) {
+    const key = layout && layout.key.get(id);
+    if (!key) return false;
+    return colors["orient|" + key] === "vertical";
+  }
+
+  function setOrientation(id, orient) {
+    const key = layout && layout.key.get(id);
+    if (!key) return;
+    if (orient === "vertical") {
+      colors["orient|" + key] = "vertical";
+    } else {
+      delete colors["orient|" + key];
+    }
+    saveColors();
+    if (result) render({});
+  }
+
+  function toggleOrientation(id) {
+    setOrientation(id, isVertical(id) ? "horizontal" : "vertical");
+  }
+
   function objectHTML(id, o, heap, diff, tags, step) {
     const cell = (key, v, opts = {}) => {
       const ch = diff && diff.changed.has(key);
       return { cls: ch ? " changed" : "", html: valueHTML(v, heap, { ...opts, changed: ch, was: ch ? diff.old.get(key) : null }) };
     };
-    let head = "", body = "";
+    let head = "", body = "", headActions = "";
     if (o.type === "instance") {
       head = o.cls;
       body = o.attrs.length
@@ -689,6 +711,8 @@
       const isStack = /\bstack\b/i.test(vname);
       const isQueue = /\bqueue\b/i.test(vname);
       const showIdx = o.type === "list" || o.type === "tuple";
+      const isVert = isVertical(id);
+      headActions = `<span class="obj-actions"><button class="orient-btn" data-id="${id}" title="Switch to ${isVert ? "horizontal" : "vertical"} layout">${isVert ? "⇅ vertical" : "⇄ horizontal"}</button></span>`;
       const cells = o.items.map((v, i) => {
         const c = cell(fieldKey(id, o, i), v, { inCollection: true });
         const isTop = isStack && i === o.items.length - 1;
@@ -697,8 +721,8 @@
         return `<div class="cell${c.cls}">${showIdx ? `<span class="idx">${i}${badge}</span>` : ""}<span class="v">${c.html}</span></div>`;
       }).join("");
       const emptyLabel = isStack ? "empty stack" : (isQueue ? "empty queue" : "empty");
-      body = o.items.length ? `<div class="cells">${cells}${o.more ? `<div class="cell"><span class="v muted">+${o.more}</span></div>` : ""}</div>`
-                            : `<div class="cells muted">${emptyLabel}</div>`;
+      body = o.items.length ? `<div class="cells${isVert ? " vertical" : ""}">${cells}${o.more ? `<div class="cell"><span class="v muted">+${o.more}</span></div>` : ""}</div>`
+                            : `<div class="cells${isVert ? " vertical" : ""} muted">${emptyLabel}</div>`;
     } else if (o.type === "function") {
       head = "function"; body = `<div class="plain">${esc(o.name)}(…)</div>`;
     } else if (o.type === "class") {
@@ -711,7 +735,7 @@
     const tagHTML = tags && tags.length
       ? `<div class="tags">${tags.map((t) => `<span class="ptag${t.local ? " local" : ""}${t.changed ? " changed" : ""}${t.color && t.color.faded ? " faded" : ""}" data-frame="${esc(t.frame)}" data-var="${esc(t.name)}" title="${t.name === "return" ? "return value" : `variable in ${esc(t.frame)}, click to colour it`}"${tagStyle(t)}>${esc(t.name)}</span>`).join("")}</div>`
       : "";
-    return `<div class="obj" data-id="${id}">${tagHTML}<div class="obj-head">${esc(head)}</div>${body}</div>`;
+    return `<div class="obj" data-id="${id}">${tagHTML}<div class="obj-head"><span class="obj-type">${esc(head)}</span>${headActions}</div>${body}</div>`;
   }
 
   function tagStyle(t) {
@@ -1094,9 +1118,29 @@
   function openPicker(frameName, name, anchor) {
     popTarget = `${frameName}|${name}`;
     const c = colors[popTarget] || {};
+    const step = result && result.steps[stepIndex];
+    let orientSection = "";
+    if (step) {
+      const f = step.frames.find((fr) => fr.name === frameName);
+      if (f) {
+        const v = f.vars.find(([n]) => n === name);
+        if (v && v[1][0] === "ref") {
+          const targetId = v[1][1];
+          const o = step.heap[targetId];
+          if (o && o.items) {
+            const isVert = isVertical(targetId);
+            orientSection = `<div class="pop-label">List layout</div><div class="pop-row seg">
+              <button class="pop-orient-btn${!isVert ? " on" : ""}" data-id="${targetId}" data-orient="horizontal">Horizontal ⇄</button>
+              <button class="pop-orient-btn${isVert ? " on" : ""}" data-id="${targetId}" data-orient="vertical">Vertical ⇅</button>
+            </div>`;
+          }
+        }
+      }
+    }
     pop.innerHTML = `<div class="pop-title"><code>${esc(name)}</code> <span class="muted">in ${esc(frameName)}</span></div>
       <div class="pop-label">Line <span class="muted">(arrow and name tag)</span></div><div class="pop-row">${swatchRow("line", c.line)}</div>
       <div class="pop-label">Border <span class="muted">(around the variable and its box)</span></div><div class="pop-row">${swatchRow("border", c.border)}</div>
+      ${orientSection}
       <div class="pop-label">Focus</div><div class="pop-row">
         <button class="pop-fade${c.faded ? " on" : ""}" aria-pressed="${!!c.faded}">${c.faded ? "Faded" : "Fade"} ◐</button>
         <button class="pop-focus" title="Fade every other variable so this one stands out">Fade all others</button></div>
@@ -1110,7 +1154,17 @@
     popTarget = "box|" + key;
     const c = colors[popTarget] || {};
     const step = result.steps[stepIndex];
+    const o = step && step.heap[id];
+    let orientSection = "";
+    if (o && o.items) {
+      const isVert = isVertical(id);
+      orientSection = `<div class="pop-label">List layout</div><div class="pop-row seg">
+        <button class="pop-orient-btn${!isVert ? " on" : ""}" data-id="${id}" data-orient="horizontal">Horizontal ⇄</button>
+        <button class="pop-orient-btn${isVert ? " on" : ""}" data-id="${id}" data-orient="vertical">Vertical ⇅</button>
+      </div>`;
+    }
     pop.innerHTML = `<div class="pop-title"><code>${esc(shortName(step.heap, id, step))}</code> <span class="muted">box</span></div>
+      ${orientSection}
       <div class="pop-row"><button class="pop-fade${c.faded ? " on" : ""}" aria-pressed="${!!c.faded}">${c.faded ? "Faded" : "Fade this box"} ◐</button></div>
       <div class="pop-foot"><span class="muted">Fades the box and the arrows leaving it.</span><button class="pop-reset">Reset</button></div>`;
     placePop(anchor);
@@ -1137,7 +1191,18 @@
   pop.addEventListener("click", (e) => {
     const b = e.target.closest("button.sw");
     if (b) setColor(b.dataset.kind, b.dataset.c);
-    if (e.target.closest(".pop-reset") && popTarget) { delete colors[popTarget]; saveColors(); if (result) render({}); closePicker(); }
+    const orientBtn = e.target.closest(".pop-orient-btn");
+    if (orientBtn) {
+      setOrientation(orientBtn.dataset.id, orientBtn.dataset.orient);
+      pop.querySelectorAll(".pop-orient-btn").forEach((btn) => btn.classList.toggle("on", btn === orientBtn));
+    }
+    if (e.target.closest(".pop-reset") && popTarget) {
+      delete colors[popTarget];
+      if (popTarget.startsWith("box|")) delete colors["orient|" + popTarget.slice(4)];
+      saveColors();
+      if (result) render({});
+      closePicker();
+    }
     const fade = e.target.closest(".pop-fade");
     if (fade && popTarget) {
       const c = { ...(colors[popTarget] || {}) };
@@ -1191,6 +1256,13 @@
     const heapEl = $("heap");
     let drag = null;
     heapEl.addEventListener("pointerdown", (e) => {
+      const orientBtn = e.target.closest(".orient-btn");
+      if (orientBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        toggleOrientation(orientBtn.dataset.id);
+        return;
+      }
       const el = e.target.closest(".obj");
       if (!el || e.button !== 0 || !layout) return;
       e.preventDefault();
