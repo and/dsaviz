@@ -143,11 +143,11 @@ button:disabled { opacity: .5; cursor: default; }
 .obj .plain { padding: 5px 9px; border-top: 1px solid var(--obj-border); }
 .obj.empty .cells { padding: 5px 9px; color: var(--muted); }
 
-/* Vertical list layout */
-.obj .cells.vertical { display: flex; flex-direction: column; min-width: 100px; }
+/* Vertical list layout: stack grows upward with index 0 at the bottom */
+.obj .cells.vertical { display: flex; flex-direction: column-reverse; min-width: 100px; }
 .obj .cells.vertical .cell { display: flex; flex-direction: row; align-items: center; justify-content: space-between;
   border-right: 0; border-bottom: 1px solid var(--obj-border); min-width: auto; min-height: 27px; padding: 3px 8px; gap: 14px; }
-.obj .cells.vertical .cell:last-child { border-bottom: 0; }
+.obj .cells.vertical .cell:first-child { border-bottom: 0; }
 .obj .cells.vertical .cell .idx { padding: 0; display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; }
 .obj .cells.vertical .cell .v { padding: 0; display: flex; align-items: center; justify-content: flex-end; }
 .obj .cells.vertical.muted { padding: 5px 9px; font-size: 12px; }
