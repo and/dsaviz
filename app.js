@@ -1252,11 +1252,21 @@
     const rank = (ch) => /^(l|left|lc|lchild|left_child)$/i.test(slot.get(ch) || "") ? 0
       : /^(r|right|rc|rchild|right_child)$/i.test(slot.get(ch) || "") ? 2 : 1;
     const instKids = (id) => (kids.get(id) || []).filter((ch) => types.get(ch) === "instance" && slot.has(ch));
+    // "Branching" means two different instance children held at the same moment
+    // (left and right). A list whose next pointer is rewired over time has only one
+    // at any step, so it stays a chain.
+    const branching = new Set();
+    for (const step of result.steps) {
+      for (const [id, o] of Object.entries(step.heap)) {
+        if (!o || o.type !== "instance" || branching.has(id)) continue;
+        const targets = new Set(o.attrs.filter(([, v]) => v && v[0] === "ref" && types.get(v[1]) === "instance" && v[1] !== id).map(([, v]) => v[1]));
+        if (targets.size >= 2) branching.add(id);
+      }
+    }
     const isTree = (id, seen = new Set()) => {
       if (seen.has(id)) return false;
       seen.add(id);
-      const ks = instKids(id);
-      return ks.length >= 2 || ks.some((ch) => isTree(ch, seen));
+      return branching.has(id) || instKids(id).some((ch) => isTree(ch, seen));
     };
     const pos = new Map(), taken = new Set();
     let rows = 0;
