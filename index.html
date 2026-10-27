@@ -62,6 +62,7 @@
       </span>
       <span class="grow"></span>
       <label class="check" title="Show instance nodes as circles with their values (hover to see attributes)"><input type="checkbox" id="abstract-mode"> abstract mode</label>
+      <label class="check" title="Draw trees with each parent centred over its children, and nodes spaced evenly. Off: nodes sit in in-order columns."><input type="checkbox" id="centre-trees"> centre trees</label>
       <label class="check" title="Route arrows to the nearest side of a box so they don't cross under other boxes. Off: every arrow enters a box from the left, like Python Tutor."><input type="checkbox" id="smart-arrows" checked> clearer arrows</label>
       <label class="check"><input type="checkbox" id="hide-defs" checked> hide functions and classes</label>
       <button id="unfade-all" title="Bring back everything you faded" disabled>Show all</button>
@@ -99,8 +100,8 @@
 <div class="toast" id="toast" role="status" hidden><span class="toast-text"></span><button class="toast-close mini" aria-label="Dismiss">×</button></div>
 <div class="color-pop" id="color-pop" role="dialog" aria-label="Variable colours" hidden></div>
 
-<script src="examples.js?v=28"></script>
-<script src="app.js?v=28"></script>
+<script src="examples.js?v=30"></script>
+<script src="app.js?v=30"></script>
 <!-- Cloudflare Web Analytics: cookieless page views, same site as and.github.io -->
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "4f5287a7748d4f9abe3a1e759582e6b8"}'></script>
 </body>

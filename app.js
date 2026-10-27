@@ -73,6 +73,8 @@
   try { arrowStyle = localStorage.getItem("dsaviz-arrows") || "smart"; } catch (_) {}
   let pointerMode = "labels";
   try { pointerMode = localStorage.getItem("dsaviz-pointers") || "labels"; } catch (_) {}
+  let centreTrees = false;
+  try { centreTrees = localStorage.getItem("dsaviz-centre-trees") === "true"; } catch (_) {}
   let globalAbstractMode = false;
   try { globalAbstractMode = localStorage.getItem("dsaviz-abstract-mode") === "true"; } catch (_) {}
   const selectedNodes = new Set();
@@ -1280,6 +1282,18 @@
         after.forEach((ch) => walk(ch, depth + 1));
       };
       walk(root, 0);
+      // Centred layout: leaves take consecutive slots, a parent sits midway over
+      // its first and last child (or straight above an only child). Used when
+      // "centre trees" is on; the in-order columns above are the default.
+      let leaf = 0;
+      const tidy = (id, seen = new Set()) => {
+        seen.add(id);
+        const ks = instKids(id).filter((ch) => !seen.has(ch) && pos.get(ch) && pos.get(ch).r === pos.get(id).r + 1);
+        ks.sort((a, b) => rank(a) - rank(b));
+        ks.forEach((ch) => tidy(ch, seen));
+        pos.get(id).tx = ks.length ? (pos.get(ks[0]).tx + pos.get(ks[ks.length - 1]).tx) / 2 : leaf++;
+      };
+      tidy(root);
       treeRoots.add(root);
     }
     const treeRoots = new Set();
@@ -1369,6 +1383,7 @@
     });
 
     const GAP_X = 46, GAP_Y = 26;
+    let treeW = 0;
     const rowBox = new Map(), rowTag = new Map(), usedCols = new Map();
     const els = new Map();
     heapEl.querySelectorAll(".obj").forEach((el) => {
@@ -1377,7 +1392,8 @@
       els.set(id, el);
       rowBox.set(p.r, Math.max(rowBox.get(p.r) || 0, el.offsetHeight));
       rowTag.set(p.r, Math.max(rowTag.get(p.r) || 0, t ? t.offsetHeight + 4 : 0));
-      usedCols.set(p.c, Math.max(usedCols.get(p.c) || 0, el.offsetWidth));
+      if (centreTrees && p.tx != null) treeW = Math.max(treeW, el.offsetWidth, t ? t.scrollWidth : 0);
+      else usedCols.set(p.c, Math.max(usedCols.get(p.c) || 0, el.offsetWidth));
     });
     const rowH = new Map([...rowBox].map(([r, h]) => [r, h + rowTag.get(r)]));
     const offsets = (m, gap) => {
@@ -1391,7 +1407,7 @@
     let maxW = totalW, maxH = totalH;
     els.forEach((el, id) => {
       const p = layout.pos.get(id), m = moved.get(layout.key.get(id));
-      const x = m ? m.x : colX.get(p.c), y = m ? m.y : rowY.get(p.r) + rowTag.get(p.r);
+      const x = m ? m.x : (centreTrees && p.tx != null ? p.tx * (treeW + GAP_X) : colX.get(p.c)), y = m ? m.y : rowY.get(p.r) + rowTag.get(p.r);
       el.style.left = x + "px";
       el.style.top = y + "px";
       maxW = Math.max(maxW, x + el.offsetWidth);
@@ -1966,6 +1982,16 @@
     abstractBox.addEventListener("change", () => {
       globalAbstractMode = abstractBox.checked;
       try { localStorage.setItem("dsaviz-abstract-mode", String(globalAbstractMode)); } catch (_) {}
+      if (result) render({});
+    });
+  }
+
+  const centreBox = $("centre-trees");
+  if (centreBox) {
+    centreBox.checked = centreTrees;
+    centreBox.addEventListener("change", () => {
+      centreTrees = centreBox.checked;
+      try { localStorage.setItem("dsaviz-centre-trees", String(centreTrees)); } catch (_) {}
       if (result) render({});
     });
   }
