@@ -144,6 +144,7 @@
       try { localStorage.setItem(ACTIVE_SNIPPET_KEY, newId); } catch (_) {}
       rebuildExamplesSelect();
       examplesSel.value = "custom:" + newId;
+      saveMoved();
       updateToolbarButtons();
     } else {
       const s = getActiveSnippet();
@@ -237,6 +238,25 @@
     return customSnippets.find((s) => s.id === activeSnippetId) || customSnippets[0];
   }
 
+  // Dragged box positions are saved per custom snippet, so each snippet keeps
+  // its own layout across switches and refreshes. Built-in examples don't save.
+  const POSITIONS_PREFIX = "dsaviz-positions:";
+  function loadMoved() {
+    moved.clear();
+    if (!examplesSel.value.startsWith("custom:")) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(POSITIONS_PREFIX + activeSnippetId) || "null");
+      if (saved) Object.entries(saved).forEach(([k, v]) => moved.set(k, v));
+    } catch (_) {}
+  }
+  function saveMoved() {
+    if (!examplesSel.value.startsWith("custom:")) return;
+    try {
+      if (moved.size === 0) localStorage.removeItem(POSITIONS_PREFIX + activeSnippetId);
+      else localStorage.setItem(POSITIONS_PREFIX + activeSnippetId, JSON.stringify(Object.fromEntries(moved)));
+    } catch (_) {}
+  }
+
   function rebuildExamplesSelect() {
     examplesSel.innerHTML = "";
 
@@ -284,7 +304,7 @@
     }
     updateToolbarButtons();
     editor.scrollTop = 0;
-    moved.clear();
+    loadMoved();
     useColorsFor(editor.value, { carry: false });
     run({ keepStep: false });
   });
@@ -312,7 +332,7 @@
       editor.scrollTop = 0;
       editor.focus();
       updateToolbarButtons();
-      moved.clear();
+      loadMoved();
       useColorsFor(editor.value, { carry: false });
       run({ keepStep: false });
     });
@@ -342,6 +362,7 @@
       if (!confirm(`Delete snippet "${s.name}"?`)) return;
       const idx = customSnippets.findIndex((x) => x.id === s.id);
       if (idx >= 0) customSnippets.splice(idx, 1);
+      try { localStorage.removeItem(POSITIONS_PREFIX + s.id); } catch (_) {}
       if (customSnippets.length === 0) {
         const fresh = {
           id: "c_" + Date.now(),
@@ -361,7 +382,7 @@
       editor.value = getActiveSnippet().code;
       editor.scrollTop = 0;
       updateToolbarButtons();
-      moved.clear();
+      loadMoved();
       useColorsFor(editor.value, { carry: false });
       run({ keepStep: false });
     });
@@ -458,6 +479,7 @@
     }
     updateToolbarButtons();
   }
+  loadMoved();
   useColorsFor(editor.value, { carry: false });
   const initialCode = (async () => {
     const shared = await readShareHash(location.hash);
@@ -491,6 +513,7 @@
       }
     }
     updateToolbarButtons();
+    loadMoved();
     useColorsFor(editor.value, { carry: false });
     paintEditor();
   })();
@@ -1198,17 +1221,41 @@
         if (!types.has(id)) { types.set(id, o.type); order.push(id); }
       }
     }
-    for (const step of result.steps) {
-      for (const [id, o] of Object.entries(step.heap)) {
-        if (!o || hidden(id)) continue;
-        for (const ch of childRefs(o)) {
-          if (ch === id || parent.has(ch) || hidden(ch) || !types.has(ch)) continue;
-          parent.set(ch, id);
-          if (!kids.has(id)) kids.set(id, []);
-          kids.get(id).push(ch);
+    // Instance-to-instance links claim children first, so a list that merely
+    // holds a node (a stack, a result) never becomes that node's parent.
+    const slot = new Map();   // child id -> attribute name its parent holds it in
+    const link = (id, ch, name) => {
+      if (ch === id || parent.has(ch) || hidden(ch) || !types.has(ch)) return;
+      parent.set(ch, id);
+      if (name != null) slot.set(ch, name);
+      if (!kids.has(id)) kids.set(id, []);
+      kids.get(id).push(ch);
+    };
+    for (const instOnly of [true, false]) {
+      for (const step of result.steps) {
+        for (const [id, o] of Object.entries(step.heap)) {
+          if (!o || hidden(id)) continue;
+          if (instOnly) {
+            if (o.type !== "instance") continue;
+            o.attrs.forEach(([k, v]) => { if (v && v[0] === "ref" && types.get(v[1]) === "instance") link(id, v[1], k); });
+          } else {
+            for (const ch of childRefs(o)) link(id, ch, null);
+          }
         }
       }
     }
+    // A tree: an instance root whose descendants include a node with two or more
+    // instance children. Drawn by depth (row) and in-order position (column),
+    // left children before right ones, so a missing child leaves no gap.
+    const rank = (ch) => /^(l|left|lc|lchild|left_child)$/i.test(slot.get(ch) || "") ? 0
+      : /^(r|right|rc|rchild|right_child)$/i.test(slot.get(ch) || "") ? 2 : 1;
+    const instKids = (id) => (kids.get(id) || []).filter((ch) => types.get(ch) === "instance" && slot.has(ch));
+    const isTree = (id, seen = new Set()) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      const ks = instKids(id);
+      return ks.length >= 2 || ks.some((ch) => isTree(ch, seen));
+    };
     const pos = new Map(), taken = new Set();
     let rows = 0;
     const place = (id, r, c) => { pos.set(id, { r, c }); taken.add(r + "," + c); rows = Math.max(rows, r + 1); };
@@ -1221,11 +1268,32 @@
         visit(ch);
       });
     }
-    const start = (id) => { if (!pos.has(id) && !hidden(id)) { place(id, rows, 0); visit(id); } };
+    function placeTree(root) {
+      const top = rows;
+      let col = 0;
+      const walk = (id, depth) => {
+        if (pos.has(id)) return;
+        const ks = instKids(id).filter((ch) => !pos.has(ch)).sort((a, b) => rank(a) - rank(b));
+        const before = ks.filter((ch) => rank(ch) < 1), after = ks.filter((ch) => rank(ch) >= 1);
+        before.forEach((ch) => walk(ch, depth + 1));
+        place(id, top + depth, col++);
+        after.forEach((ch) => walk(ch, depth + 1));
+      };
+      walk(root, 0);
+      treeRoots.add(root);
+    }
+    const treeRoots = new Set();
+    const start = (id) => {
+      if (pos.has(id) || hidden(id)) return;
+      if (types.get(id) === "instance" && isTree(id)) { placeTree(id); return; }
+      place(id, rows, 0); visit(id);
+    };
+    // Trees first: a list holding the root (a stack, say) must not pull it into a chain.
+    order.filter((id) => !slot.has(id) && types.get(id) === "instance" && !hidden(id) && isTree(id)).forEach(placeTree);
     order.filter((id) => !parent.has(id)).forEach(start);
     order.forEach(start);   // anything left over sits on a cycle
     const key = new Map(order.map((id, i) => [id, "o" + i]));
-    layout = { pos, key };
+    layout = { pos, key, treeRoots };
   }
 
   // ---------- render ----------
@@ -1816,6 +1884,7 @@
       drag.el.classList.remove("dragging");
       const tag = drag.tag, head = drag.head, circle = drag.circle, id = drag.clickedId, tapped = !drag.didMove && e.type === "pointerup";
       const wasMulti = drag.wasMulti;
+      if (drag.didMove) saveMoved();
       drag = null;
 
       if (tapped && !wasMulti) {
@@ -1840,7 +1909,7 @@
       }
     });
 
-    $("reset-layout").addEventListener("click", () => { moved.clear(); if (result) render({}); });
+    $("reset-layout").addEventListener("click", () => { moved.clear(); saveMoved(); if (result) render({}); });
   })();
 
   // Selection bar action buttons
