@@ -1930,18 +1930,18 @@
     let marquee = null;
 
     heapEl.addEventListener("pointerdown", (e) => {
-      const orientBtn = e.target.closest(".orient-btn");
-      if (orientBtn) {
-        e.stopPropagation();
-        e.preventDefault();
-        toggleOrientation(orientBtn.dataset.id);
-        return;
-      }
       const graphBtn = e.target.closest(".graph-btn");
       if (graphBtn) {
         e.stopPropagation();
         e.preventDefault();
         toggleGraphView(graphBtn.dataset.id);
+        return;
+      }
+      const orientBtn = e.target.closest(".orient-btn");
+      if (orientBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        toggleOrientation(orientBtn.dataset.id);
         return;
       }
       const absBtn = e.target.closest(".abstract-btn, .expand-btn");
