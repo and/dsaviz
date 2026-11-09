@@ -1086,11 +1086,15 @@
         ? `<path class="${cls}" d="M${sx} ${sy} Q ${mx} ${my} ${ex} ${ey}"${mk} fill="none"/>`
         : `<path class="${cls}" d="M${sx} ${sy} L ${ex} ${ey}"${mk} fill="none"/>`;
     });
-    let nodeSvg = "";
+    let nodeSvg = "", minX = 0, maxX = gp.w;   // tags can run past the laid-out width
     for (const k of info.keys) {
       const p = pt(k), mem = member.get(k), seen = mem && [...mem].some((n) => /visited|seen|done|explored/i.test(n));
       const ring = mem && [...mem].some((n) => !/visited|seen|done|explored/i.test(n));
       const label = formatAbstractVal(["prim", k]), tg = names.get(k), left = p.x < gp.w / 2;
+      if (tg) {
+        const reach = G_R + (ring ? 11 : 6) + [...tg].join(", ").length * 7 + 8;
+        if (left) minX = Math.min(minX, p.x - reach); else maxX = Math.max(maxX, p.x + reach);
+      }
       nodeSvg += `<g data-key="${esc(k)}">${ring ? `<circle class="g-node-ring" cx="${p.x}" cy="${p.y}" r="${G_R + 5}" fill="none"/>` : ""}` +
         `<circle class="g-node${seen ? " g-node-visited" : ""}${hot.has(k) ? " g-node-hot" : ""}" cx="${p.x}" cy="${p.y}" r="${G_R}"><title>${esc(k)}${mem ? " · in " + esc([...mem].join(", ")) : ""}</title></circle>` +
         `<text class="g-label" x="${p.x}" y="${p.y}" text-anchor="middle" dominant-baseline="central">${esc(label)}</text>` +
@@ -1099,7 +1103,7 @@
     const marker = `<marker id="gh-${id}" viewBox="0 0 10 10" refX="9.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M0.5 1 L9.5 5 L0.5 9 Z" fill="var(--arrow)"/></marker>`;
     const isSelected = selectedNodes.has(id);
     return `<div class="obj graph-obj${isSelected ? " selected" : ""}" data-id="${id}" data-type="dict">${tagHTML}<div class="obj-head"><span class="obj-type">dict</span><span class="obj-actions"><button class="orient-btn graph-btn" data-id="${id}" title="Shown as a graph. Click to show the dict as a table">◉ graph</button></span></div>` +
-      `<svg class="graph-svg" width="${gp.w}" height="${gp.h}" viewBox="0 0 ${gp.w} ${gp.h}" style="display:block"><defs>${marker}</defs>${edgeSvg}${nodeSvg}</svg></div>`;
+      `<svg class="graph-svg" width="${maxX - minX}" height="${gp.h}" viewBox="${minX} 0 ${maxX - minX} ${gp.h}" style="display:block"><defs>${marker}</defs>${edgeSvg}${nodeSvg}</svg></div>`;
   }
 
   function objectHTML(id, o, heap, diff, tags, step) {
