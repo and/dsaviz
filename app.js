@@ -1098,7 +1098,7 @@
     }
     const marker = `<marker id="gh-${id}" viewBox="0 0 10 10" refX="9.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M0.5 1 L9.5 5 L0.5 9 Z" fill="var(--arrow)"/></marker>`;
     const isSelected = selectedNodes.has(id);
-    return `<div class="obj graph-obj${isSelected ? " selected" : ""}" data-id="${id}" data-type="dict">${tagHTML}<div class="obj-head"><span class="obj-actions"><button class="graph-btn" data-id="${id}" title="Show the raw dict as a table">▤ table</button></span></div>` +
+    return `<div class="obj graph-obj${isSelected ? " selected" : ""}" data-id="${id}" data-type="dict">${tagHTML}<div class="obj-head"><span class="obj-type">dict</span><span class="obj-actions"><button class="orient-btn graph-btn" data-id="${id}" title="Shown as a graph. Click to show the dict as a table">◉ graph</button></span></div>` +
       `<svg class="graph-svg" width="${gp.w}" height="${gp.h}" viewBox="0 0 ${gp.w} ${gp.h}" style="display:block"><defs>${marker}</defs>${edgeSvg}${nodeSvg}</svg></div>`;
   }
 
@@ -1192,7 +1192,7 @@
         : `<div class="plain muted">no attributes</div>`;
     } else if (o.type === "dict") {
       head = "dict";
-      if (graphInfo(heap, id)) headActions = `<span class="obj-actions"><button class="graph-btn" data-id="${id}" title="Show as a graph">◉ graph</button></span>`;
+      if (graphInfo(heap, id)) headActions = `<span class="obj-actions"><button class="orient-btn graph-btn" data-id="${id}" title="Shown as a table. Click to show it as a graph">▤ table</button></span>`;
       const rows = o.items.map(([k, v]) => {
         const ck = cell(fieldKey(id, o, 0, k[0] === "prim" ? k[1] : "?"), k, { inCollection: true });
         const cv = cell(fieldKey(id, o, 0, k[0] === "prim" ? k[1] : "?"), v, { inCollection: true });
