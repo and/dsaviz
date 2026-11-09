@@ -887,17 +887,17 @@
   function isVertical(id) {
     const key = layout && layout.key.get(id);
     if (!key) return false;
-    return colors["orient|" + key] === "vertical";
+    const set = colors["orient|" + key];
+    if (set) return set === "vertical";
+    // A list held in a variable called "stack" reads best standing up, until the user picks.
+    const step = result && result.steps[stepIndex];
+    return !!step && /\bstack\b/i.test(varNameFor(step, id) || "");
   }
 
   function setOrientation(id, orient) {
     const key = layout && layout.key.get(id);
     if (!key) return;
-    if (orient === "vertical") {
-      colors["orient|" + key] = "vertical";
-    } else {
-      delete colors["orient|" + key];
-    }
+    colors["orient|" + key] = orient;
     saveColors();
     if (result) render({});
   }
@@ -1098,7 +1098,7 @@
     }
     const marker = `<marker id="gh-${id}" viewBox="0 0 10 10" refX="9.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M0.5 1 L9.5 5 L0.5 9 Z" fill="var(--arrow)"/></marker>`;
     const isSelected = selectedNodes.has(id);
-    return `<div class="obj graph-obj${isSelected ? " selected" : ""}" data-id="${id}" data-type="dict">${tagHTML}<div class="obj-head"><span class="obj-type">graph</span><span class="obj-actions"><button class="graph-btn" data-id="${id}" title="Show the raw dict as a table">▤ table</button></span></div>` +
+    return `<div class="obj graph-obj${isSelected ? " selected" : ""}" data-id="${id}" data-type="dict">${tagHTML}<div class="obj-head"><span class="obj-actions"><button class="graph-btn" data-id="${id}" title="Show the raw dict as a table">▤ table</button></span></div>` +
       `<svg class="graph-svg" width="${gp.w}" height="${gp.h}" viewBox="0 0 ${gp.w} ${gp.h}" style="display:block"><defs>${marker}</defs>${edgeSvg}${nodeSvg}</svg></div>`;
   }
 
