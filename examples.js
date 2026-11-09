@@ -139,4 +139,61 @@ counts["c"] = nums
 print(nums, copy)
 `,
   },
+  {
+    name: "Graph: has path (DFS)",
+    code: `graph = {
+  'f': ['g', 'i'],
+  'g': ['h'],
+  'h': [],
+  'i': ['g', 'k'],
+  'j': ['i'],
+  'k': []
+}
+
+def has_path(graph, src, dst):
+  stack = [src]
+
+  while stack:
+    current = stack.pop()
+    print(current)
+    if current == dst:
+      return True
+
+    for n in graph[current]:
+      stack.append(n)
+
+  return False
+
+has_path(graph, 'f', 'k') # True
+`,
+  },
+  {
+    name: "Graph: BFS shortest path (queue, visited set)",
+    code: `graph = {
+  'a': ['b', 'c'],
+  'b': ['a', 'd'],
+  'c': ['a', 'd'],
+  'd': ['b', 'c', 'e'],
+  'e': ['d']
+}
+
+def shortest_path(graph, src, dst):
+  queue = [(src, 0)]
+  visited = {src}
+
+  while queue:
+    current, dist = queue.pop(0)
+    if current == dst:
+      return dist
+
+    for n in graph[current]:
+      if n not in visited:
+        visited.add(n)
+        queue.append((n, dist + 1))
+
+  return -1
+
+print(shortest_path(graph, 'a', 'e'))
+`,
+  },
 ];

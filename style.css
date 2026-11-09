@@ -564,3 +564,21 @@ button.mini { font-size: 12px; padding: 2px 8px; border-radius: 6px; }
   .stdout { max-height: 96px; }
   .foot { flex: none; padding: 4px 20px 8px; font-size: 12px; line-height: 1.5; }
 }
+
+/* ---------- Graph view ---------- */
+.obj.graph-obj { background: transparent; border: 0; box-shadow: none; border-radius: 0; cursor: grab; }
+.obj.graph-obj:hover { border: 0; box-shadow: none; }
+.obj.graph-obj:active { cursor: grabbing; }
+.graph-obj svg { display: block; overflow: visible; }
+.g-edge, .g-edge-dir { stroke: var(--arrow); stroke-width: 2; fill: none; }
+.g-edge-hot { stroke: var(--hot); stroke-width: 2.8; }
+.g-head { fill: var(--arrow); }
+.g-head.hot { fill: var(--hot); }
+.g-node { fill: var(--obj-bg); stroke: var(--obj-border); stroke-width: 2; }
+.g-node-visited { fill: var(--ghost); fill-opacity: .35; }
+.g-node-ring { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 3; }
+.g-node-hot { stroke: var(--hot); stroke-width: 2.5; filter: drop-shadow(0 0 4px var(--hot-soft)); }
+.g-node-text, .g-node text { font-family: var(--mono); font-size: 15px; font-weight: 700; fill: var(--text); text-anchor: middle; dominant-baseline: central; pointer-events: none; user-select: none; }
+.g-label, .g-tag { font-family: var(--mono); font-size: 11.5px; line-height: 1.5; padding: 0 6px; border-radius: 4px; white-space: nowrap;
+  background: var(--accent-soft); border: 1px solid var(--accent); color: var(--accent); }
+.g-tag.changed { background: var(--hot); border-color: var(--hot); color: #fff; }

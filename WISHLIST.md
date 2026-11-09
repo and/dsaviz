@@ -12,6 +12,8 @@ Ideas for making dsaviz easier for students to follow. Roughly in priority order
 
 - [x] **Your own colours per variable.** Click a variable's name (in its frame, or its name tag) to pick a line colour (its arrow and tag) and a border colour (around the variable and the box it points to). Saved per program in the browser.
 
+- [x] **Graph view.** A dict of neighbour lists is drawn as nodes and edges instead of boxes, with variables and stack/queue/visited members marked on the nodes.
+
 ## Next
 
 - [ ] **Smooth movement between steps.** When you press Next, a changed arrow slides from its old target to its new one (about 300 ms), and moved labels glide to their new box.

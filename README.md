@@ -13,6 +13,7 @@ It's like [Python Tutor](https://pythontutor.com), but everything runs **in your
 - **Linked lists**: objects keep their place while you step, so you can watch a single `.next` arrow move when a link is rewired.
 - **Recursion**: every call gets its own frame on the stack, with its return value.
 - **Trees, lists, dicts, aliasing**: see when two names point at the same object.
+- **Graphs**: a dict of neighbour lists is detected as a graph and drawn as circles joined by edges, with variables like `current` and containers like `stack` or `visited` marked on the nodes.
 
 ## Using it
 

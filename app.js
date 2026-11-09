@@ -959,6 +959,149 @@
     return String(v);
   }
 
+  // ---------- graphs ----------
+  // An adjacency dict ({'a': ['b', 'c'], ...}) is a graph when it has at least three
+  // keys, every value is a list/tuple/set of its own keys, and there is an edge.
+  // Returns { keys: [repr...], edges: [[i, j]...], lists: [list ids] } or null.
+  function graphInfo(heap, id) {
+    const o = heap[id];
+    if (!o || o.type !== "dict" || o.more || o.items.length < 3) return null;
+    const keys = [], index = new Map(), lists = [];
+    for (const [k] of o.items) {
+      if (!k || k[0] !== "prim" || index.has(k[1])) return null;
+      index.set(k[1], keys.length);
+      keys.push(k[1]);
+    }
+    const edges = [];
+    let bad = false;
+    o.items.forEach(([, v], i) => {
+      const l = v && v[0] === "ref" ? heap[v[1]] : null;
+      if (!l || !l.items || l.type === "dict" || l.more) { bad = true; return; }
+      lists.push(v[1]);
+      for (const it of l.items) {
+        if (!it || it[0] !== "prim" || !index.has(it[1])) { bad = true; return; }
+        edges.push([i, index.get(it[1])]);
+      }
+    });
+    if (bad || edges.length < 1) return null;
+    return { keys, edges, lists };
+  }
+
+  const graphViewOn = (id) => {
+    const key = layout && layout.key.get(id);
+    return !(key && colors["graph|" + key] === false);
+  };
+  function toggleGraphView(id) {
+    const key = layout && layout.key.get(id);
+    if (!key) return;
+    if (graphViewOn(id)) colors["graph|" + key] = false; else delete colors["graph|" + key];
+    saveColors();
+    layout = null;
+    if (result) render({});
+  }
+
+  const G_R = 18, G_PAD = 28, G_SIDE = 56;   // G_SIDE: room for variable tags beside the outer nodes
+  // Layered layout of the union of every step's graph, so nodes stay put while stepping.
+  function layoutGraph(keys, edges) {
+    const n = keys.length, out = keys.map(() => []), indeg = keys.map(() => 0);
+    edges.forEach(([a, b]) => { if (a !== b) { out[a].push(b); indeg[b]++; } });
+    const level = new Array(n).fill(-1);
+    const bfs = (roots, base) => {
+      let q = roots.slice();
+      roots.forEach((r) => { level[r] = base; });
+      while (q.length) {
+        const next = [];
+        for (const a of q) for (const b of out[a]) if (level[b] < 0) { level[b] = level[a] + 1; next.push(b); }
+        q = next;
+      }
+    };
+    const sources = keys.map((_, i) => i).filter((i) => indeg[i] === 0);
+    bfs(sources.length ? sources : [0], 0);
+    for (let i = 0; i < n; i++) if (level[i] < 0) bfs([i], Math.max(0, ...level) + 1);
+    const depth = Math.max(...level) + 1;
+    const rows = Array.from({ length: depth }, () => []);
+    level.forEach((l, i) => rows[l].push(i));
+    const order = new Array(n).fill(0);
+    rows.forEach((row, l) => {
+      if (l > 0) {
+        const bary = (i) => {
+          const ps = [];
+          edges.forEach(([a, b]) => { if (b === i && a !== i && level[a] === l - 1) ps.push(order[a]); });
+          return ps.length ? ps.reduce((s, x) => s + x, 0) / ps.length : Infinity;
+        };
+        row.sort((a, b) => bary(a) - bary(b) || a - b);
+      }
+      row.forEach((i, j) => { order[i] = j; });
+    });
+    const SX = 84, SY = 78, widest = Math.max(...rows.map((r) => r.length));
+    const nodes = new Map();
+    rows.forEach((row, l) => row.forEach((i, j) => {
+      nodes.set(keys[i], { x: G_SIDE + G_PAD + (widest - row.length) * SX / 2 + (j + 0.5) * SX, y: 26 + G_R + l * SY, level: l });
+    }));
+    return { w: (G_PAD + G_SIDE) * 2 + widest * SX, h: 26 + G_R * 2 + (depth - 1) * SY + 14, nodes };
+  }
+
+  function graphHTML(id, heap, diff, tagHTML, step, info) {
+    const gp = layout && layout.graphPos.get(id);
+    if (!gp || !info.keys.every((k) => gp.nodes.has(k))) return null;
+    const keyed = new Set(info.keys), skip = new Set([id, ...info.lists]);
+    const names = new Map(), hot = new Set(), member = new Map();   // key -> ...
+    const add = (m, k, v) => { if (!m.has(k)) m.set(k, new Set()); m.get(k).add(v); };
+    step.frames.forEach((f) => f.vars.forEach(([name, v]) => {
+      const ch = diff && diff.changed.has(varKey(f, name));
+      if (v[0] === "prim") {
+        if (!keyed.has(v[1])) return;
+        add(names, v[1], name);
+        if (ch) hot.add(v[1]);
+      } else if (v[0] === "ref" && !skip.has(v[1]) && heap[v[1]]) {
+        const h = heap[v[1]];
+        const items = h.type === "dict" ? h.items.map(([k]) => k) : h.items;
+        if (!items) return;
+        items.forEach((it) => { if (it && it[0] === "prim" && keyed.has(it[1])) add(member, it[1], name); });
+      }
+    }));
+    const pt = (k) => gp.nodes.get(k);
+    const has = new Set(info.edges.map(([a, b]) => a + ">" + b));
+    let edgeSvg = "";
+    info.edges.forEach(([a, b]) => {
+      const A = pt(info.keys[a]), B = pt(info.keys[b]);
+      const mutual = a !== b && has.has(b + ">" + a);
+      if (mutual && a > b) return;
+      const cls = mutual ? "g-edge" : "g-edge g-edge-dir";
+      const mk = mutual ? "" : ` marker-end="url(#gh-${id})"`;
+      if (a === b) {
+        edgeSvg += `<path class="${cls}" d="M${A.x - 7} ${A.y - G_R + 2} C ${A.x - 24} ${A.y - G_R - 26}, ${A.x + 24} ${A.y - G_R - 26}, ${A.x + 7} ${A.y - G_R + 2}"${mk} fill="none"/>`;
+        return;
+      }
+      const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+      const far = Math.abs(B.level - A.level) !== 1;
+      const bend = far ? 40 * (a < b ? 1 : -1) : 0;
+      const mx = (A.x + B.x) / 2 - uy * bend * 2, my = (A.y + B.y) / 2 + ux * bend * 2;
+      // leave and enter along the line toward the control point so ends meet the circle edge
+      const sx0 = far ? mx : B.x, sy0 = far ? my : B.y, ex0 = far ? mx : A.x, ey0 = far ? my : A.y;
+      const s0 = Math.hypot(sx0 - A.x, sy0 - A.y) || 1, e0 = Math.hypot(ex0 - B.x, ey0 - B.y) || 1;
+      const sx = A.x + (sx0 - A.x) / s0 * G_R, sy = A.y + (sy0 - A.y) / s0 * G_R;
+      const ex = B.x + (ex0 - B.x) / e0 * (G_R + (mutual ? 0 : 3)), ey = B.y + (ey0 - B.y) / e0 * (G_R + (mutual ? 0 : 3));
+      edgeSvg += far
+        ? `<path class="${cls}" d="M${sx} ${sy} Q ${mx} ${my} ${ex} ${ey}"${mk} fill="none"/>`
+        : `<path class="${cls}" d="M${sx} ${sy} L ${ex} ${ey}"${mk} fill="none"/>`;
+    });
+    let nodeSvg = "";
+    for (const k of info.keys) {
+      const p = pt(k), mem = member.get(k), seen = mem && [...mem].some((n) => /visited|seen|done|explored/i.test(n));
+      const ring = mem && [...mem].some((n) => !/visited|seen|done|explored/i.test(n));
+      const label = formatAbstractVal(["prim", k]), tg = names.get(k), left = p.x < gp.w / 2;
+      nodeSvg += `<g data-key="${esc(k)}">${ring ? `<circle class="g-node-ring" cx="${p.x}" cy="${p.y}" r="${G_R + 5}" fill="none"/>` : ""}` +
+        `<circle class="g-node${seen ? " g-node-visited" : ""}${hot.has(k) ? " g-node-hot" : ""}" cx="${p.x}" cy="${p.y}" r="${G_R}"><title>${esc(k)}${mem ? " · in " + esc([...mem].join(", ")) : ""}</title></circle>` +
+        `<text class="g-label" x="${p.x}" y="${p.y}" text-anchor="middle" dominant-baseline="central">${esc(label)}</text>` +
+        (tg ? `<text class="g-tag" x="${p.x + (left ? -(G_R + (ring ? 11 : 6)) : G_R + (ring ? 11 : 6))}" y="${p.y}" text-anchor="${left ? "end" : "start"}" dominant-baseline="central" style="paint-order:stroke;stroke:var(--obj-bg);stroke-width:4px;stroke-linejoin:round">${esc([...tg].join(", "))}</text>` : "") + `</g>`;
+    }
+    const marker = `<marker id="gh-${id}" viewBox="0 0 10 10" refX="9.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M0.5 1 L9.5 5 L0.5 9 Z" fill="var(--arrow)"/></marker>`;
+    const isSelected = selectedNodes.has(id);
+    return `<div class="obj graph-obj${isSelected ? " selected" : ""}" data-id="${id}" data-type="dict">${tagHTML}<div class="obj-head"><span class="obj-type">graph</span><span class="obj-actions"><button class="graph-btn" data-id="${id}" title="Show the raw dict as a table">▤ table</button></span></div>` +
+      `<svg class="graph-svg" width="${gp.w}" height="${gp.h}" viewBox="0 0 ${gp.w} ${gp.h}" style="display:block"><defs>${marker}</defs>${edgeSvg}${nodeSvg}</svg></div>`;
+  }
+
   function objectHTML(id, o, heap, diff, tags, step) {
     const cell = (key, v, opts = {}) => {
       const ch = diff && diff.changed.has(key);
@@ -967,6 +1110,12 @@
     const tagHTML = tags && tags.length
       ? `<div class="tags">${tags.map((t) => `<span class="ptag${t.local ? " local" : ""}${t.changed ? " changed" : ""}${t.color && t.color.faded ? " faded" : ""}" data-frame="${esc(t.frame)}" data-var="${esc(t.name)}" title="${t.name === "return" ? "return value" : `variable in ${esc(t.frame)}, click to colour it`}"${tagStyle(t)}>${esc(t.name)}</span>`).join("")}</div>`
       : "";
+
+    if (o.type === "dict" && graphViewOn(id)) {
+      const info = graphInfo(heap, id);
+      const g = info && graphHTML(id, heap, diff, tagHTML, step, info);
+      if (g) return g;
+    }
 
     if (isAbstract(id, o)) {
       const rawVal = getNodeValue(o);
@@ -1043,6 +1192,7 @@
         : `<div class="plain muted">no attributes</div>`;
     } else if (o.type === "dict") {
       head = "dict";
+      if (graphInfo(heap, id)) headActions = `<span class="obj-actions"><button class="graph-btn" data-id="${id}" title="Show as a graph">◉ graph</button></span>`;
       const rows = o.items.map(([k, v]) => {
         const ck = cell(fieldKey(id, o, 0, k[0] === "prim" ? k[1] : "?"), k, { inCollection: true });
         const cv = cell(fieldKey(id, o, 0, k[0] === "prim" ? k[1] : "?"), v, { inCollection: true });
@@ -1215,12 +1365,49 @@
     const types = new Map(), order = [], parent = new Map(), kids = new Map();
     const hidden = (id) => {
       const t = types.get(id);
+      if (absorbed.has(id)) return true;
       return hideDefsBox.checked && (t === "function" || t === "class" || t === "module");
     };
     for (const step of result.steps) {
       for (const [id, o] of Object.entries(step.heap)) {
         if (!o) continue;
         if (!types.has(id)) { types.set(id, o.type); order.push(id); }
+      }
+    }
+    // Graphs: adjacency dicts become one drawn graph, so their lists vanish from the layout.
+    const graphPos = new Map(), absorbed = new Set();
+    {
+      const gd = new Map(), outside = new Set();   // dict id -> { keys, edges } union
+      for (const step of result.steps) {
+        for (const id of Object.keys(step.heap)) {
+          if (colors["graph|o" + order.indexOf(id)] === false) continue;
+          const info = graphInfo(step.heap, id);
+          if (!info) continue;
+          if (!gd.has(id)) gd.set(id, { keys: [], seen: new Set(), edges: new Set(), lists: new Set() });
+          const u = gd.get(id);
+          info.keys.forEach((k) => { if (!u.seen.has(k)) { u.seen.add(k); u.keys.push(k); } });
+          info.edges.forEach(([a, b]) => u.edges.add(info.keys[a] + "\u0000" + info.keys[b]));
+          info.lists.forEach((l) => u.lists.add(l));
+        }
+      }
+      if (gd.size) {
+        const cand = new Set([...gd.values()].flatMap((u) => [...u.lists]));
+        for (const step of result.steps) {
+          step.frames.forEach((f) => {
+            f.vars.forEach(([, v]) => { if (v[0] === "ref") outside.add(v[1]); });
+            if (f.returning && f.returning[0] === "ref") outside.add(f.returning[1]);
+          });
+          for (const [id, o] of Object.entries(step.heap)) {
+            if (!o || gd.has(id)) continue;
+            childRefs(o).forEach((c) => outside.add(c));
+          }
+        }
+        cand.forEach((l) => { if (!outside.has(l)) absorbed.add(l); });
+        gd.forEach((u, id) => {
+          const idx = new Map(u.keys.map((k, i) => [k, i]));
+          const edges = [...u.edges].map((e) => e.split("\u0000")).map(([a, b]) => [idx.get(a), idx.get(b)]);
+          graphPos.set(id, layoutGraph(u.keys, edges));
+        });
       }
     }
     // Instance-to-instance links claim children first, so a list that merely
@@ -1317,7 +1504,7 @@
     order.filter((id) => !parent.has(id)).forEach(start);
     order.forEach(start);   // anything left over sits on a cycle
     const key = new Map(order.map((id, i) => [id, "o" + i]));
-    layout = { pos, key, treeRoots };
+    layout = { pos, key, treeRoots, graphPos, absorbed };
   }
 
   // ---------- render ----------
@@ -1378,7 +1565,7 @@
     for (const id of selectedNodes) {
       if (!heap[id]) selectedNodes.delete(id);
     }
-    const visible = Object.keys(heap).filter((id) => heap[id] && !isHidden(heap, id) && layout.pos.has(id));
+    const visible = Object.keys(heap).filter((id) => heap[id] && !isHidden(heap, id) && layout.pos.has(id) && !layout.absorbed.has(id));
     const heapEl = $("heap");
     heapEl.innerHTML = visible.map((id) => objectHTML(id, heap[id], heap, diff, tags.get(id), step)).join("");
     heapEl.querySelectorAll(".obj").forEach((el) => {
@@ -1748,6 +1935,13 @@
         e.stopPropagation();
         e.preventDefault();
         toggleOrientation(orientBtn.dataset.id);
+        return;
+      }
+      const graphBtn = e.target.closest(".graph-btn");
+      if (graphBtn) {
+        e.stopPropagation();
+        e.preventDefault();
+        toggleGraphView(graphBtn.dataset.id);
         return;
       }
       const absBtn = e.target.closest(".abstract-btn, .expand-btn");
