@@ -162,7 +162,10 @@
     rerunTimer = setTimeout(() => run({ keepStep: true }), RERUN_DELAY_MS);
   });
   editor.addEventListener("keydown", (e) => {
-    if (e.key === "Tab") {
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === "/") {
+      e.preventDefault();
+      toggleComment();
+    } else if (e.key === "Tab") {
       e.preventDefault();
       const { selectionStart: a, selectionEnd: b, value } = editor;
       editor.value = value.slice(0, a) + "  " + value.slice(b);
@@ -186,6 +189,30 @@
       insertAtCaret("\n" + indent);
     }
   });
+  // Cmd/Ctrl+/ : comment or uncomment every line the selection touches.
+  function toggleComment() {
+    const { selectionStart: a, selectionEnd: b, value } = editor;
+    const start = value.lastIndexOf("\n", a - 1) + 1;
+    // A selection ending at the very start of a line doesn't include that line.
+    const endRef = b > a && value[b - 1] === "\n" ? b - 1 : b;
+    let end = value.indexOf("\n", endRef);
+    if (end < 0) end = value.length;
+    const lines = value.slice(start, end).split("\n");
+    const body = lines.filter((l) => l.trim());
+    if (!body.length) return;
+    const allCommented = body.every((l) => /^\s*#/.test(l));
+    const minIndent = Math.min(...body.map((l) => l.match(/^[ \t]*/)[0].length));
+    const out = lines.map((l) => {
+      if (!l.trim()) return l;
+      if (allCommented) return l.replace(/^(\s*)# ?/, "$1");
+      return l.slice(0, minIndent) + "# " + l.slice(minIndent);
+    });
+    editor.focus();
+    editor.setSelectionRange(start, end);
+    insertAtCaret(out.join("\n"));
+    // Keep the same lines selected.
+    editor.setSelectionRange(start, start + out.join("\n").length);
+  }
   // Insert text at the caret, keeping the browser's undo history when possible.
   function insertAtCaret(text) {
     editor.focus();
